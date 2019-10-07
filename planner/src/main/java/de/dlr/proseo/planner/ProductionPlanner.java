@@ -50,30 +50,17 @@ public class ProductionPlanner implements CommandLineRunner {
 	public static final String jobContainerPrefix = "proseocont";
 
 	/**
-	 * Current running ProductionPlanner
-	 */
-	private static ProductionPlanner thePlanner = null;
-	
-	/**
 	 * Current running KubeConfigs
 	 */
-	private static Map<String, KubeConfig> kubeConfigs = new HashMap<>();
+	private Map<String, KubeConfig> kubeConfigs = new HashMap<>();
 	
-	/**
-	 * Ghe current running ProductionPlanner
-	 * 
-	 * @return the current running ProductionPlanner
-	 */
-	public static ProductionPlanner getPlanner() {
-		return thePlanner;		
-	}
 	/**
 	 * Look for connected KubeConfig of name. 
 	 * 
-	 * @param name of KubeConfig to find (may be null)
+	 * @param name of KubeConfig to find (if null, returns first in collection, if available)
 	 * @return KubeConfig found or null
 	 */
-	public static KubeConfig getKubeConfig(String name) {
+	public KubeConfig getKubeConfig(String name) {
 		if (name == null) {
 			if (0 < kubeConfigs.size()) {
 				return (KubeConfig) kubeConfigs.values().toArray()[0];
@@ -87,8 +74,8 @@ public class ProductionPlanner implements CommandLineRunner {
 	/**
 	 * @return the collection of KubeConfigs which are connected.
 	 */
-	public static Collection<KubeConfig> getKubeConfigs() {
-		return (Collection<KubeConfig>) kubeConfigs.values();
+	public Collection<KubeConfig> getKubeConfigs() {
+		return kubeConfigs.values();
 	}
 	
 	/**
@@ -106,7 +93,7 @@ public class ProductionPlanner implements CommandLineRunner {
 	 * Walk through ProcessingFacility list of DB and try to connect each.
 	 * Disconnect and remove KubeConfigs not defined in this list.
 	 */
-	public static void updateKubeConfigs() {
+	public void updateKubeConfigs() {
 		boolean found = false;
 		KubeConfig kubeConfig = null;
 		for (ProcessingFacility pf : RepositoryService.getFacilityRepository().findAll()) {
@@ -144,13 +131,6 @@ public class ProductionPlanner implements CommandLineRunner {
 		}
 	}
 		
-	/**
-	 * Set static variable "thePlanner".
-	 */
-	public ProductionPlanner() {
-		thePlanner = this;
-	}	
-	
 	/* (non-Javadoc)
 	 * @see org.springframework.boot.CommandLineRunner#run(java.lang.String[])
 	 */
@@ -165,7 +145,7 @@ public class ProductionPlanner implements CommandLineRunner {
 		//        	}
 		//        } 
 
-		ProductionPlanner.updateKubeConfigs();
+		this.updateKubeConfigs();
 	}
 
 }

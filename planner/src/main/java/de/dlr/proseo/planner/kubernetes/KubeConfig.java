@@ -10,7 +10,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
-import de.dlr.proseo.model.dao.JobStepRepository;
 import de.dlr.proseo.planner.rest.model.PlannerPod;
 import de.dlr.proseo.planner.rest.model.PodKube;
 import io.kubernetes.client.ApiClient;

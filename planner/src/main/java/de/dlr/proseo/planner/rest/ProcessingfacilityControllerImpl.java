@@ -34,16 +34,20 @@ public class ProcessingfacilityControllerImpl implements ProcessingfacilityContr
 	
 	private static Logger logger = LoggerFactory.getLogger(JobControllerImpl.class);
 
+	/** The Production Planner instance */
+    @Autowired
+    private ProductionPlanner productionPlanner;
+    
     /**
      * Get attached processing facilities
      * 
      */
 	@Override
     public ResponseEntity<List<PlannerProcessingFacility>> getPlannerProcessingFacilities() {
-		ProductionPlanner.updateKubeConfigs();
-		if (ProductionPlanner.getKubeConfigs() != null) {
+		productionPlanner.updateKubeConfigs();
+		if (productionPlanner.getKubeConfigs() != null) {
 			List<PlannerProcessingFacility> l = new ArrayList<PlannerProcessingFacility>();
-			for (de.dlr.proseo.planner.kubernetes.KubeConfig kc: ProductionPlanner.getKubeConfigs()) {
+			for (de.dlr.proseo.planner.kubernetes.KubeConfig kc: productionPlanner.getKubeConfigs()) {
 				l.add(new PlannerProcessingFacility(kc.getId(),
 						kc.getDescription(),
 						kc.getProcessingEngineUrl()));
@@ -66,7 +70,7 @@ public class ProcessingfacilityControllerImpl implements ProcessingfacilityContr
 	@Override
 	public ResponseEntity<PlannerProcessingFacility> getPlannerProcessingFacilityByName(String name) {
 		// todo handle name
-		de.dlr.proseo.planner.kubernetes.KubeConfig aKubeConfig = ProductionPlanner.getKubeConfig(name);
+		de.dlr.proseo.planner.kubernetes.KubeConfig aKubeConfig = productionPlanner.getKubeConfig(name);
 		if (aKubeConfig != null) {
 			PlannerProcessingFacility pf = new PlannerProcessingFacility(aKubeConfig.getId(),
 					aKubeConfig.getDescription(),
@@ -97,7 +101,7 @@ public class ProcessingfacilityControllerImpl implements ProcessingfacilityContr
 	 */
 	@Override
 	public  ResponseEntity<List<PlannerPod>> getPlannerPods(String status, String name) {
-		de.dlr.proseo.planner.kubernetes.KubeConfig aKubeConfig = ProductionPlanner.getKubeConfig(name);
+		de.dlr.proseo.planner.kubernetes.KubeConfig aKubeConfig = productionPlanner.getKubeConfig(name);
 		if (aKubeConfig != null) {
 			if (aKubeConfig.getId().equalsIgnoreCase(name)) {
 				// todo handle name
@@ -139,7 +143,7 @@ public class ProcessingfacilityControllerImpl implements ProcessingfacilityContr
      */
 	@Override
     public ResponseEntity<?> deletePod(String status, String name) {
-		de.dlr.proseo.planner.kubernetes.KubeConfig aKubeConfig = ProductionPlanner.getKubeConfig(name);
+		de.dlr.proseo.planner.kubernetes.KubeConfig aKubeConfig = productionPlanner.getKubeConfig(name);
 		if (aKubeConfig != null) {
 			if (aKubeConfig.isConnected()) {	
 				aKubeConfig.deletePodsStatus(status);
@@ -167,7 +171,7 @@ public class ProcessingfacilityControllerImpl implements ProcessingfacilityContr
      */
 	@Override
     public ResponseEntity<PlannerPod> modifyProcessingfacilities(String podname, String name, String status) {
-		de.dlr.proseo.planner.kubernetes.KubeConfig aKubeConfig = ProductionPlanner.getKubeConfig(name);
+		de.dlr.proseo.planner.kubernetes.KubeConfig aKubeConfig = productionPlanner.getKubeConfig(name);
 		if (aKubeConfig != null) {
 			// todo check for existing pod, jobstep, ... 
 			// set jobstep and pod status,
@@ -193,7 +197,7 @@ public class ProcessingfacilityControllerImpl implements ProcessingfacilityContr
      * 
      */
 	public ResponseEntity<PlannerPod> getPlannerPod(String podname, String name) {
-		de.dlr.proseo.planner.kubernetes.KubeConfig aKubeConfig = ProductionPlanner.getKubeConfig(name);
+		de.dlr.proseo.planner.kubernetes.KubeConfig aKubeConfig = productionPlanner.getKubeConfig(name);
 		if (aKubeConfig != null) {
 			V1Job aJob = aKubeConfig.getV1Job(podname);
 			if (aJob != null) {
@@ -216,7 +220,7 @@ public class ProcessingfacilityControllerImpl implements ProcessingfacilityContr
      */
 	@Override
     public ResponseEntity<PlannerJobstep> updateProcessingfacilities(String podname, String name) {
-    	KubeJob aJob = ProductionPlanner.getKubeConfig(name).createJob(podname);
+    	KubeJob aJob = productionPlanner.getKubeConfig(name).createJob(podname);
     	if (aJob != null) {
     		PlannerJobstep aPlan = new PlannerJobstep();
     		aPlan.setId(((Integer)aJob.getJobId()).toString());

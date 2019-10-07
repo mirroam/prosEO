@@ -8,6 +8,7 @@ import javax.validation.Valid;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -37,6 +38,10 @@ public class JobstepControllerImpl implements JobstepController {
 	
 	private static Logger logger = LoggerFactory.getLogger(JobControllerImpl.class);
 
+	/** The Production Planner instance */
+    @Autowired
+    private ProductionPlanner productionPlanner;
+    
     /**
      * Get production planner jobsteps by id
      * 
@@ -134,7 +139,7 @@ public class JobstepControllerImpl implements JobstepController {
 	@Override
     public ResponseEntity<PlannerJobstep> deleteJobstepByName(String name) {
 		// TODO Auto-generated method stub
-    	boolean result = ProductionPlanner.getKubeConfig(null).deleteJob(name);
+    	boolean result = productionPlanner.getKubeConfig(null).deleteJob(name);
     	if (result) {
     		String message = String.format(MSG_PREFIX + "job deleted (%s)", name);
     		logger.error(message);

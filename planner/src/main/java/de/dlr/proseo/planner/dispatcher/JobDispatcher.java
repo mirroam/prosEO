@@ -5,7 +5,6 @@
  */
 package de.dlr.proseo.planner.dispatcher;
 
-import java.util.List;
 import java.util.Set;
 
 import de.dlr.proseo.model.ConfiguredProcessor;
@@ -14,7 +13,6 @@ import de.dlr.proseo.model.JobStep;
 import de.dlr.proseo.model.ProcessingOrder;
 import de.dlr.proseo.model.Product;
 import de.dlr.proseo.model.ProductQuery;
-import de.dlr.proseo.model.dao.ProductRepository;
 import de.dlr.proseo.model.joborder.Conf;
 import de.dlr.proseo.model.joborder.JobOrder;
 import de.dlr.proseo.model.service.RepositoryService;

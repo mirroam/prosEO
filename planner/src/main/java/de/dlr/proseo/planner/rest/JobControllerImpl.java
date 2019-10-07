@@ -38,6 +38,10 @@ public class JobControllerImpl implements JobController {
 	
 	private static Logger logger = LoggerFactory.getLogger(JobControllerImpl.class);
 	
+	/** The Production Planner instance */
+    @Autowired
+    private ProductionPlanner productionPlanner;
+    
     /**
      * Get production planner jobs by id
      * 
@@ -46,10 +50,10 @@ public class JobControllerImpl implements JobController {
     public ResponseEntity<List<PlannerJob>> getPlannerJobsByState(String state) {
 		// todo remove test start
 
-		if (ProductionPlanner.getKubeConfig(null).isConnected()) {
-	    	KubeJob aJob = ProductionPlanner.getKubeConfig(null).createJob("test");
+		if (productionPlanner.getKubeConfig(null).isConnected()) {
+	    	KubeJob aJob = productionPlanner.getKubeConfig(null).createJob("test");
 	    	if (aJob != null) {
-	    		ProductionPlanner.getKubeConfig(null).deleteJob(aJob);
+	    		productionPlanner.getKubeConfig(null).deleteJob(aJob);
 	    	}
 		}
 		return null;
@@ -66,7 +70,7 @@ public class JobControllerImpl implements JobController {
 	@Override
     public ResponseEntity<PlannerJob> updateJobs(String name) {
 		// TODO Auto-generated method stub
-    	KubeJob aJob = ProductionPlanner.getKubeConfig(null).createJob(name);
+    	KubeJob aJob = productionPlanner.getKubeConfig(null).createJob(name);
     	if (aJob != null) {
     		PlannerJob aPlan = new PlannerJob();
     		aPlan.setId(((Integer)aJob.getJobId()).toString());
@@ -84,7 +88,7 @@ public class JobControllerImpl implements JobController {
 	@Override
     public ResponseEntity<PlannerJob> deleteJobByName(String name) {
 		// TODO Auto-generated method stub
-    	boolean result = ProductionPlanner.getKubeConfig(null).deleteJob(name);
+    	boolean result = productionPlanner.getKubeConfig(null).deleteJob(name);
     	if (result) {
     		String message = String.format(MSG_PREFIX + "job deleted (%s)", name);
     		logger.error(message);

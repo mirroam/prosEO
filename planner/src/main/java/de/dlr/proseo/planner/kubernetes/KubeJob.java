@@ -3,37 +3,10 @@
  */
 package de.dlr.proseo.planner.kubernetes;
 
-import java.util.List;
-import java.util.Map;
-
-import javax.inject.Inject;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.autoconfigure.domain.EntityScan;
-import org.springframework.boot.autoconfigure.security.SecurityProperties;
-import org.springframework.boot.web.server.LocalServerPort;
-import org.springframework.context.ApplicationContext;
-import org.springframework.context.annotation.Import;
-import org.springframework.context.annotation.ImportResource;
-import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
-import org.springframework.stereotype.Repository;
-import org.springframework.test.annotation.DirtiesContext;
-import org.springframework.test.context.junit4.SpringJUnit4ClassRunner;
-import org.springframework.transaction.annotation.Transactional;
-
-
 import de.dlr.proseo.model.service.RepositoryService;
 import de.dlr.proseo.model.JobStep;
-import de.dlr.proseo.model.dao.JobRepository;
-import de.dlr.proseo.model.dao.JobStepRepository;
 import de.dlr.proseo.model.joborder.JobOrder;
-import de.dlr.proseo.planner.ProductionPlanner;
 import io.kubernetes.client.ApiException;
 import io.kubernetes.client.models.V1Job;
 import io.kubernetes.client.models.V1JobBuilder;

@@ -3,8 +3,8 @@ title: prosEO UI Command Line Interface Syntax
 # command line program and to be returned as online help for the user.
 version: v0.1
 description: |
-  Commands can be invoked on the shell command line following the name of the prosEO executable (e. g. "proseo")
-  and at least one whitespace character.
+  Commands can be entered after the "prosEO>" command prompt. They can also be invoked on the shell command line 
+  following the name of the prosEO executable (e. g. "proseo") and at least one whitespace character.
   
   Commands may have subcommands, which precede all options and parameters.
   
@@ -22,12 +22,12 @@ description: |
   All date-time values must conform to the ISO date-time format ("YYYY-MM-DDTHH:MM:SS").
   
   So the general syntax is:
-  ["proseo"] command [subcommand...] [option...] [parameter...]
+  command [subcommand...] [option...] [parameter...]
 
 globalOptions:
     - name: help
       type: boolean
-      description: Show help information for the current command level (top level commands, when called from the shell command line)
+      description: Show help information for the current command/subcommand level (top level commands, when called from the shell command line)
       shortForm: h
 
 options:
@@ -37,13 +37,11 @@ options:
       shortForm: v
     - name: user
       type: string
-      description: The user name for login to prosEO. If a command is given upon program invocation, but no username,
-                   login is attempted using the default user name and password stored in the application configuration file.
+      description: The user name for login to prosEO.
       shortForm: u
     - name: password
       type: string
-      description: The password for login to prosEO (only valid if a user name for login is given. If a user name is given,
-                   but no password, an interactive password prompt will occur.
+      description: The password for login to prosEO (only valid if a user name for login is given).
       shortForm: p
     - name: mission
       type: string
@@ -61,7 +59,7 @@ commands:
       
     # Authentication:
     - name: login
-      description: Log in to a mission in prosEO. A login is required prior to executing any other command except "mission show".
+      description: Log in to a mission in prosEO. All valid commands except for "mission show" require prior login.
       options:
         - name: user
           type: string
@@ -74,7 +72,8 @@ commands:
       parameters:
         - name: missionCode
           type: string
-          description: The code of the mission to log in to
+          optional: true
+          description: The code of the mission to log in to (may be empty for user with prosEO Administrator privileges)
     - name: logout
       description: Log out of prosEO. No commands except "mission show" and "login" will be accepted after logout.
     
@@ -220,7 +219,10 @@ commands:
               type: string
               description: The code of the spacecraft the orbits belong to
     - name: order
-      description: Commands for managing processing orders
+      description: Commands for managing processing orders; some commands can only be issued, if the order is in the correct status.
+                   Order status sequence is Initial - Approved - Planned - Released - Running - Completed/Failed - Closed.
+                   Additionally an order may be in status "Suspending" after issuing a "suspend" command, until all running
+                   job steps are finished.
       subcommands:
         - name: show
           description: Lists orders, optionally restricted to a given time range or a specific processing order
@@ -240,7 +242,7 @@ commands:
               optional: true
               description: The order identifier (overrides --from and --to options)
         - name: create
-          description: Create a new processing order; if the input is not from a file,
+          description: Create a new processing order (in status Initial); if the input is not from a file,
                        the user will be prompted for mandatory attributes not given on the command line
           options:
             - name: file
@@ -262,7 +264,7 @@ commands:
               description: An order attribute to update in the form "<attribute name>=<attribute value>",
                            overrides values given in the order definition file
         - name: update
-          description: Update a processing order (only allowed in status initial)
+          description: Update a processing order (only allowed in status Initial)
           options:
             - name: file
               type: string
@@ -285,20 +287,14 @@ commands:
               repeatable: true
               description: An order attribute to update in the form "<attribute name>=<attribute value>",
                            overrides values given in the order definition file
-        - name: delete
-          description: Delete the named processing order (only allowed in status closed)
-          parameters:
-            - name: orderId
-              type: string
-              description: The order identifier
         - name: approve
-          description: Approve the named processing order for planning (must be in status initial)
+          description: Approve the named processing order for planning (must be in status Initial, new status is Approved)
           parameters:
             - name: orderId
               type: string
               description: The order identifier
         - name: plan
-          description: Plan the jobs for the named processing order (must be in status approved)
+          description: Plan the jobs for the named processing order (must be in status Approved, new status is Planned)
           options:
             - name: format
               type: string
@@ -310,39 +306,51 @@ commands:
             - name: facility
               type: string
               description: The processing facility, on which the order shall be run
+        - name: reset
+          description: Reset the named processing order to initial state (must be in status Approved or Planned,
+                       new status is Initial)
+          parameters:
+            - name: orderId
+              type: string
+              description: The order identifier
         - name: release
-          description: Release the jobs of the named processing order for processing (must be in status planned)
+          description: Release the jobs of the named processing order for processing (must be in status Planned,
+                       new status is Released; order status will change to Running, when execution of the first job step starts;
+                       when all job steps are finished, the status will change again to Completed, if all job steps finished
+                       successfully, or Failed, if at least one job step failed)
           parameters:
             - name: orderId
               type: string
               description: The order identifier
         - name: suspend
-          description: Suspend starting of further jobs for the named processing order (order reverts to status planned)
+          description: Suspend starting of further jobs for the named processing order (must be in status Released or Running, 
+                       new status is Suspending, then Planned, when all running job steps are finished)
           parameters:
             - name: orderId
               type: string
               description: The order identifier
         - name: resume
-          description: Resume starting of jobs for the named processing order after suspend
+          description: Resume starting of jobs for the named processing order after suspend (order must be in status Planned,
+                       new status is Released [actually the same command as "release"])
           parameters:
             - name: orderId
               type: string
               description: The order identifier
         - name: cancel
-          description: Cancel the named processing order (remaining jobs are not executed, order state changes to failed;
-              order must be in status planned, i. e. not yet released or suspended)
+          description: Cancel the named processing order (remaining jobs are not executed, order state changes to Failed;
+              order must be in status Planned, i. e. it may be necessary to issue a "suspend" command first)
           parameters:
             - name: orderId
               type: string
               description: The order identifier
         - name: close
-          description: Close the named processing order (if it is completed or failed)
+          description: Close the named processing order (must be in status Completed or Failed, new status is Closed)
           parameters:
             - name: orderId
               type: string
               description: The order identifier
-        - name: reset
-          description: Reset the named processing order to initial state (if it is approved or planned)
+        - name: delete
+          description: Delete the named processing order (only allowed in status Closed)
           parameters:
             - name: orderId
               type: string
@@ -572,11 +580,10 @@ commands:
               parameters:
                 - name: className
                   type: string
-                  description: The class name of the processor
+                  description: The class name of the configured processor to delete
                 - name: configuredProcessorIdentifier
                   type: string
-                  optional: true
-                  description: The identifier of the configured processor
+                  description: The identifier of the configured processor to delete
     - name: configuration
       description: Commands for managing configurations
       subcommands:
@@ -653,10 +660,10 @@ commands:
           parameters:
             - name: className
               type: string
-              description: The name of the processor classes to update (mandatory if not read from file)
+              description: The name of the processor class
             - name: configurationVersion
               type: string
-              description: The version of the configuration to update (mandatory if not read from file)
+              description: The version of the configuration to delete
                  
     # Commands for the Product Class Manager
     - name: productclass
@@ -754,7 +761,6 @@ commands:
                 - name: format
                   type: string
                   description: The file format (one of { PLAIN, JSON, XML, YAML }; default value JSON)
-                               Note. Only PLAIN format is implemented for the time being.
               parameters:
                 - name: targetProductClass
                   type: string
@@ -873,25 +879,12 @@ commands:
               repeatable: true
               description: A product attribute to set in the form "<attribute name>=<attribute value>"
         - name: delete
-          description: Delete all products matching the given selection criteriy
-          options:
-            - name: file
-              type: string
-              description: Path to file to read the product definition from
-              shortForm: f
-            - name: format
-              type: string
-              description: The file format (one of { JSON, XML, YAML }; default value JSON)
+          description: Delete the product with the given database ID
           parameters:
             - name: id
               type: integer
               optional: true
-              description: The database ID of the product to delete (mandatory if not read from file)
-            - name: attribute
-              type: string
-              optional: true
-              repeatable: true
-              description: A product attribute to filter by in the form "<attribute name>=<attribute value>"
+              description: The database ID of the product to delete
     - name: ingest
       description: Ingest all products into the storage manager of the given processing facility
       options:
@@ -906,5 +899,222 @@ commands:
         - name: processingFacility
           type: string
           description: The name of the facility to ingest the products to
+
+    # Commands for the User Manager
+    - name: user
+      description: Commands for managing users (note that user names are stored with a mission prefix in the user database,
+                   but the mission prefix is not used in the command-line interface)
+      subcommands:
+        - name: show
+          description: Show user accounts for the current mission
+          parameters:
+            - name: userName
+              type: string
+              optional: true
+              description: The name of the user account to show (without mission prefix)
+        - name: create
+          description: Create a new user account within the given mission
+          options:
+            - name: file
+              type: string
+              description: Path to file to read the user account definition from
+              shortForm: f
+            - name: format
+              type: string
+              description: The file format (one of { JSON, XML, YAML }; default value JSON)
+          parameters:
+            - name: userName
+              type: string
+              optional: true
+              description: The name of the user account to create (without mission prefix; mandatory if not read from file)
+            - name: attribute
+              type: string
+              optional: true
+              repeatable: true
+              description: A user attribute to set in the form "<attribute name>=<attribute value>"
+        - name: update
+          description: Update the given user account;
+                       the user will be prompted for mandatory attributes not given on the command line
+          options:
+            - name: file
+              type: string
+              description: Path to file to read the user account definition from
+              shortForm: f
+            - name: format
+              type: string
+              description: The file format (one of { JSON, XML, YAML }; default value JSON)
+            - name: delete-attributes
+              type: boolean
+              description: Delete attributes not given in the user account definition file and/or the command parameters
+          parameters:
+            - name: userName
+              type: integer
+              optional: true
+              description: The name of the user account to update (without mission prefix; mandatory if not read from file)
+            - name: attribute
+              type: string
+              optional: true
+              repeatable: true
+              description: A user account attribute to set in the form "<attribute name>=<attribute value>"
+        - name: delete
+          description: Delete the user account with the given name
+          parameters:
+            - name: userName
+              type: integer
+              optional: false
+              description: The name of the user account to delete (without mission prefix)
+        - name: enable
+          description: Enable the user account with the given name
+          parameters:
+            - name: userName
+              type: integer
+              optional: false
+              description: The name of the user account to enable (without mission prefix)
+        - name: disable
+          description: Disable the user account with the given name
+          parameters:
+            - name: userName
+              type: integer
+              optional: false
+              description: The name of the user account to disable (without mission prefix)
+        - name: grant
+          description: Grant authorities for the current mission directly to the user
+                       (not recommended, use of group authorities recommended)
+          parameters:
+            - name: userName
+              type: integer
+              optional: false
+              description: The name of the user account to grant authorities to
+                           (without mission prefix; mandatory if not read from file)
+            - name: authority
+              type: string
+              optional: false
+              repeatable: true
+              description: An authority to grant (multiple authorities allowed)
+        - name: revoke
+          description: Revoke authorities for the current mission from the user (directly granted authorities only)
+          parameters:
+            - name: userName
+              type: integer
+              optional: false
+              description: The name of the user account to revoke authorities from
+                           (without mission prefix; mandatory if not read from file)
+            - name: authority
+              type: string
+              optional: false
+              repeatable: true
+              description: An authority to revoke (multiple authorities allowed)
+    - name: group
+      description: Commands for managing groups (note that group names are stored with a mission prefix in the user database,
+                   but the mission prefix is not used in the command-line interface)
+      subcommands:
+        - name: show
+          description: Show user groups for the current mission
+          parameters:
+            - name: groupName
+              type: string
+              optional: true
+              description: The name of the user group to show (without mission prefix)
+        - name: create
+          description: Create a new user group within the given mission
+          options:
+            - name: file
+              type: string
+              description: Path to file to read the user group definition from
+              shortForm: f
+            - name: format
+              type: string
+              description: The file format (one of { JSON, XML, YAML }; default value JSON)
+          parameters:
+            - name: groupName
+              type: string
+              optional: true
+              description: The name of the user group to create (without mission prefix; mandatory if not read from file)
+            - name: attribute
+              type: string
+              optional: true
+              repeatable: true
+              description: A group attribute to set in the form "<attribute name>=<attribute value>"
+        - name: update
+          description: Update the given user group;
+                       the user will be prompted for mandatory attributes not given on the command line
+          options:
+            - name: file
+              type: string
+              description: Path to file to read the user group definition from
+              shortForm: f
+            - name: format
+              type: string
+              description: The file format (one of { JSON, XML, YAML }; default value JSON)
+            - name: delete-attributes
+              type: boolean
+              description: Delete attributes not given in the user group definition file and/or the command parameters
+          parameters:
+            - name: groupName
+              type: integer
+              optional: true
+              description: The name of the user group to update (without mission prefix; mandatory if not read from file)
+            - name: attribute
+              type: string
+              optional: true
+              repeatable: true
+              description: A user group attribute to set in the form "<attribute name>=<attribute value>"
+        - name: delete
+          description: Delete the group account with the given name
+          parameters:
+            - name: groupName
+              type: integer
+              optional: false
+              description: The name of the user account to delete (without mission prefix)
+        - name: grant
+          description: Grant authorities for the current mission to the user group
+          parameters:
+            - name: groupName
+              type: integer
+              optional: false
+              description: The name of the user group to grant authorities to (without mission prefix)
+            - name: authority
+              type: string
+              optional: false
+              repeatable: true
+              description: An authority to grant (multiple authorities allowed)
+        - name: revoke
+          description: Revoke authorities for the current mission from the user group
+          parameters:
+            - name: groupName
+              type: integer
+              optional: false
+              description: The name of the user group to revoke authorities from (without mission prefix)
+            - name: authority
+              type: string
+              optional: false
+              repeatable: true
+              description: An authority to revoke (multiple authorities allowed)
+        - name: add
+          description: Add user accounts to the user group (for the current mission only, users may have different
+                       group associations in different missions)
+          parameters:
+            - name: groupName
+              type: integer
+              optional: false
+              description: The name of the user group to add users to (without mission prefix)
+            - name: userName
+              type: string
+              optional: false
+              repeatable: true
+              description: The name of a user account to add (without mission prefix; multiple user names allowed)
+        - name: remove
+          description: Remove user accounts from the user group (for the current mission only)
+          parameters:
+            - name: groupName
+              type: integer
+              optional: false
+              description: The name of the user group to remove users from (without mission prefix)
+            - name: userName
+              type: string
+              optional: false
+              repeatable: true
+              description: The name of a user account to add (without mission prefix; multiple user names allowed)
+
 # TODO Add processing facilities!
           

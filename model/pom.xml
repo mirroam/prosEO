@@ -6,7 +6,7 @@
 	<parent>
 		<groupId>de.dlr.proseo</groupId>
 		<artifactId>proseo</artifactId>
-		<version>0.0.1-SNAPSHOT</version>
+		<version>0.1.0</version>
 	</parent>
 
 	<artifactId>proseo-model</artifactId>
@@ -184,6 +184,27 @@
                        <exclude>**/Dummy*</exclude>
                     </excludes>
                 </configuration>
+            </plugin>
+            
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>rest-jar</id>
+                        <goals>
+                            <goal>jar</goal>
+                        </goals>
+                        <configuration>
+                            <classifier>rest</classifier>
+                            <includes>
+                                <include>de/dlr/proseo/model/rest/**</include>
+                                <include>de/dlr/proseo/model/enums/**</include>
+                                <include>de/dlr/proseo/model/util/OrbitTimeFormatter.class</include>
+                            </includes>
+                        </configuration>
+                    </execution>
+                </executions>
             </plugin>
 		</plugins>
 	</build>

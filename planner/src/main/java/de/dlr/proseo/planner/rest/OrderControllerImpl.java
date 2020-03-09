@@ -1,3 +1,8 @@
+/**
+ * OrderControllerImpl.java
+ * 
+ * © 2019 Prophos Informatik GmbH
+ */
 package de.dlr.proseo.planner.rest;
 
 import java.util.ArrayList;
@@ -8,18 +13,25 @@ import java.util.Optional;
 
 import de.dlr.proseo.model.Orbit;
 import de.dlr.proseo.model.ConfiguredProcessor;
+import de.dlr.proseo.model.JobStep;
 import de.dlr.proseo.model.Parameter;
 import de.dlr.proseo.model.ProcessingFacility;
 import de.dlr.proseo.model.ProcessingOrder;
 import de.dlr.proseo.model.ProductClass;
 import de.dlr.proseo.model.service.RepositoryService;
+import de.dlr.proseo.planner.Messages;
 import de.dlr.proseo.planner.ProductionPlanner;
-import de.dlr.proseo.planner.dispatcher.JobStepDispatcher;
 import de.dlr.proseo.planner.dispatcher.OrderDispatcher;
 import de.dlr.proseo.planner.kubernetes.KubeConfig;
+import de.dlr.proseo.planner.rest.model.RestJobStep;
 import de.dlr.proseo.planner.rest.model.RestOrbitQuery;
 import de.dlr.proseo.planner.rest.model.RestOrder;
 import de.dlr.proseo.planner.rest.model.RestParameter;
+import de.dlr.proseo.planner.rest.model.RestUtil;
+import de.dlr.proseo.planner.util.JobStepUtil;
+import de.dlr.proseo.planner.util.JobUtil;
+import de.dlr.proseo.planner.util.OrderUtil;
+import de.dlr.proseo.planner.util.UtilService;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -30,11 +42,15 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
+/**
+ * Spring MVC controller for the prosEO planner; implements the services required to plan
+ * and handle processing orders.
+ * 
+ * @author Ernst Melchinger
+ *
+ */
 @Component
 public class OrderControllerImpl implements OrderController {
-	private static final String HTTP_HEADER_WARNING = "Warning";
-	private static final String HTTP_HEADER_SUCCESS = "Success";
-	private static final String MSG_PREFIX = "199 proseo-planner ";
 	
 	private static Logger logger = LoggerFactory.getLogger(OrderControllerImpl.class);
 	
@@ -46,7 +62,11 @@ public class OrderControllerImpl implements OrderController {
     private OrderDispatcher orderDispatcher;
 
     @Autowired
-    private JobStepDispatcher jobStepDispatcher;
+    private JobStepUtil jobStepUtil;
+    @Autowired
+    private JobUtil jobUtil;
+    @Autowired
+    private OrderUtil orderUtil;
 
 
 	/**
@@ -61,13 +81,93 @@ public class OrderControllerImpl implements OrderController {
 		List<RestOrder> list = new ArrayList<RestOrder>();
 
 		for (ProcessingOrder po : orders) {
-			RestOrder ro = createAndCopyToRestOrder(po);
+			RestOrder ro = RestUtil.createRestOrder(po);
 			list.add(ro);			
 		}
 
 		HttpHeaders responseHeaders = new HttpHeaders();
-		responseHeaders.set(HTTP_HEADER_SUCCESS, "");
+		responseHeaders.set(Messages.HTTP_HEADER_SUCCESS.getDescription(), Messages.OK.getDescription());
 		return new ResponseEntity<>(list, responseHeaders, HttpStatus.OK);
+	}
+
+	/**
+	 * Get prcessing order of id
+	 * 
+	 */
+	@Override
+	public ResponseEntity<RestOrder> getOrder(String orderId) {
+		ProcessingOrder order = this.findOrder(orderId);
+		if (order != null) {
+			RestOrder ro = RestUtil.createRestOrder(order);
+			HttpHeaders responseHeaders = new HttpHeaders();
+			responseHeaders.set(Messages.HTTP_HEADER_SUCCESS.getDescription(), Messages.OK.getDescription());
+			return new ResponseEntity<>(ro, responseHeaders, HttpStatus.OK);
+		}
+		String message = Messages.ORDER_NOT_EXIST.formatWithPrefix(orderId);
+		logger.error(message);
+    	HttpHeaders responseHeaders = new HttpHeaders();
+    	responseHeaders.set(Messages.HTTP_HEADER_WARNING.getDescription(), message);
+		return new ResponseEntity<>(responseHeaders, HttpStatus.NOT_FOUND);
+	}
+	/**
+	 * Approve prcessing order of id
+	 * 
+	 */
+	@Override
+	public ResponseEntity<RestOrder> approveOrder(String orderId) {
+		ProcessingOrder order = this.findOrder(orderId);
+		if (order != null) {
+			Messages msg = orderUtil.approve(order);
+			if (msg.isTrue()) {
+				// canceled
+				RestOrder ro = RestUtil.createRestOrder(order);
+				HttpHeaders responseHeaders = new HttpHeaders();
+				responseHeaders.set(Messages.HTTP_HEADER_SUCCESS.getDescription(), msg.formatWithPrefix(orderId));
+				return new ResponseEntity<>(ro, responseHeaders, HttpStatus.OK);
+			} else {
+				// already running or at end, could not approve
+				RestOrder ro = RestUtil.createRestOrder(order);
+				HttpHeaders responseHeaders = new HttpHeaders();
+				responseHeaders.set(Messages.HTTP_HEADER_WARNING.getDescription(), msg.formatWithPrefix(orderId));
+				return new ResponseEntity<>(ro, responseHeaders, HttpStatus.NOT_MODIFIED);
+			}
+		}
+		String message =  Messages.ORDER_NOT_EXIST.formatWithPrefix(orderId);
+		logger.error(message);
+    	HttpHeaders responseHeaders = new HttpHeaders();
+    	responseHeaders.set(Messages.HTTP_HEADER_WARNING.getDescription(), message);
+		return new ResponseEntity<>(responseHeaders, HttpStatus.NOT_FOUND);
+	}
+
+	
+	/**
+	 * Approve prcessing order of id
+	 * 
+	 */
+	@Override
+	public ResponseEntity<RestOrder> resetOrder(String orderId) {
+		ProcessingOrder order = this.findOrder(orderId);
+		if (order != null) {
+			Messages msg = orderUtil.reset(order);
+			if (msg.isTrue()) {
+				// canceled
+				RestOrder ro = RestUtil.createRestOrder(order);
+				HttpHeaders responseHeaders = new HttpHeaders();
+				responseHeaders.set(Messages.HTTP_HEADER_SUCCESS.getDescription(), msg.formatWithPrefix(orderId));
+				return new ResponseEntity<>(ro, responseHeaders, HttpStatus.OK);
+			} else {
+				// already running or at end, could not suspend
+				RestOrder ro = RestUtil.createRestOrder(order);
+				HttpHeaders responseHeaders = new HttpHeaders();
+				responseHeaders.set(Messages.HTTP_HEADER_WARNING.getDescription(), msg.formatWithPrefix(orderId));
+				return new ResponseEntity<>(ro, responseHeaders, HttpStatus.NOT_MODIFIED);
+			}
+		}
+		String message = Messages.ORDER_NOT_EXIST.formatWithPrefix(orderId);
+		logger.error(message);
+    	HttpHeaders responseHeaders = new HttpHeaders();
+    	responseHeaders.set(Messages.HTTP_HEADER_WARNING.getDescription(), message);
+		return new ResponseEntity<>(responseHeaders, HttpStatus.NOT_FOUND);
 	}
 
 	/**
@@ -76,48 +176,64 @@ public class OrderControllerImpl implements OrderController {
 	 */
 	@Override
 	public ResponseEntity<RestOrder> planOrder(String releaseId, String facility) {
-		if (releaseId != null) {
+		if (releaseId != null && facility != null) {
 			ProcessingOrder order = findOrder(releaseId);
-			if (order != null) {
-				ProcessingFacility pf = null;
-				if (facility != null) {
-					KubeConfig kc = productionPlanner.getKubeConfig(facility);
-					if (kc != null) {
-						pf = kc.getProcessingFacility();
-					}
-				}
-				if (pf == null) {
-					productionPlanner.getKubeConfig("Lerchenhof").getProcessingFacility();
-				}
-				if (orderDispatcher.publishOrder(order, pf)) {
-					jobStepDispatcher.searchForJobStepsToRun(pf);
-					RestOrder ro = createAndCopyToRestOrder(order);
-					String message = String.format(MSG_PREFIX + "CREATE jobs for order '%s' created (%d)", order.getIdentifier(), 2000);
-					logger.error(message);
+			ProcessingFacility pf = null;
+			KubeConfig kc = productionPlanner.getKubeConfig(facility);
+			if (kc != null) {
+				pf = kc.getProcessingFacility();
+			}
+			if (order != null && pf != null) {
+				Messages msg = orderUtil.plan(order, pf);
+				if (msg.isTrue()) {
+					RestOrder ro = RestUtil.createRestOrder(order);
+					String message = msg.formatWithPrefix(order.getIdentifier());
+					logger.info(message);
 					HttpHeaders responseHeaders = new HttpHeaders();
-					responseHeaders.set(HTTP_HEADER_WARNING, message);
+					responseHeaders.set(Messages.HTTP_HEADER_SUCCESS.getDescription(), message);
 					return new ResponseEntity<>(ro, responseHeaders, HttpStatus.CREATED);
 				} else {
-					String message = String.format(MSG_PREFIX + "CREATE jobs for order '%s' not created (%d)", order.getIdentifier(), 2000);
-					logger.error(message);
+					RestOrder ro = RestUtil.createRestOrder(order);
+					String message = msg.formatWithPrefix(order.getIdentifier());
+					logger.warn(message);
 					HttpHeaders responseHeaders = new HttpHeaders();
-					responseHeaders.set(HTTP_HEADER_WARNING, message);
-					return new ResponseEntity<>(responseHeaders, HttpStatus.NOT_FOUND);
+					responseHeaders.set(Messages.HTTP_HEADER_WARNING.getDescription(), message);
+					return new ResponseEntity<>(ro, responseHeaders, HttpStatus.NOT_MODIFIED);
 				}
+			} else {
+				String message = "";
+				if (order == null && pf == null) {
+					message = Messages.ORDER_FACILITY_NOT_EXIST.formatWithPrefix(releaseId, facility);
+				} else {
+					if (order == null) {
+						message = Messages.ORDER_NOT_EXIST.formatWithPrefix(releaseId);
+					}
+					if (pf == null) {
+						message = Messages.FACILITY_NOT_EXIST.formatWithPrefix(facility);
+					}
+				}
+				logger.error(message);
+				HttpHeaders responseHeaders = new HttpHeaders();
+				responseHeaders.set(Messages.HTTP_HEADER_WARNING.getDescription(), message);
+				return new ResponseEntity<>(responseHeaders, HttpStatus.NOT_FOUND);
 			}
 		} else {
-			String message = String.format(MSG_PREFIX + "CREATE order '%s' not found (%d)", releaseId, 2000);
+			String message = "";
+			if (releaseId == null && facility == null) {
+				message = Messages.PARAM_ID_FACILITY_NOT_SET.formatWithPrefix();
+			} else {
+				if (releaseId == null) {
+					message = Messages.PARAM_ID_NOT_SET.formatWithPrefix();
+				}
+				if (facility == null) {
+					message = Messages.PARAM_FACILITY_NOT_SET.formatWithPrefix();
+				}
+			}
 			logger.error(message);
 			HttpHeaders responseHeaders = new HttpHeaders();
-			responseHeaders.set(HTTP_HEADER_WARNING, message);
+			responseHeaders.set(Messages.HTTP_HEADER_WARNING.getDescription(), message);
 			return new ResponseEntity<>(responseHeaders, HttpStatus.NOT_FOUND);
 		}
-		
-    	String message = String.format(MSG_PREFIX + "CREATE parameter name missing (%d)", 2001);
-    	logger.error(message);
-    	HttpHeaders responseHeaders = new HttpHeaders();
-    	responseHeaders.set(HTTP_HEADER_WARNING, message);
-    	return new ResponseEntity<>(responseHeaders, HttpStatus.NOT_FOUND);
 	}
 
 	/**
@@ -125,11 +241,30 @@ public class OrderControllerImpl implements OrderController {
 	 * 
 	 */
 	@Override
-	public ResponseEntity<RestOrder> releaseOrder(String resumeId) {
-    	String message = String.format(MSG_PREFIX + "Resume not implemented (%d)", 2001);
-    	logger.error(message);
+	public ResponseEntity<RestOrder> releaseOrder(String orderId) {
+		ProcessingOrder order = this.findOrder(orderId);
+		if (order != null) {
+			Messages msg = orderUtil.resume(order);
+			if (msg.isTrue()) {
+				UtilService.getJobStepUtil().checkForJobStepsToRun();
+				// canceled
+				RestOrder ro = RestUtil.createRestOrder(order);
+				HttpHeaders responseHeaders = new HttpHeaders();
+				responseHeaders.set(Messages.HTTP_HEADER_SUCCESS.getDescription(), msg.formatWithPrefix(orderId));
+				return new ResponseEntity<>(ro, responseHeaders, HttpStatus.OK);
+			} else {
+				UtilService.getJobStepUtil().checkForJobStepsToRun();
+				// already running or at end, could not suspend
+				RestOrder ro = RestUtil.createRestOrder(order);
+				HttpHeaders responseHeaders = new HttpHeaders();
+				responseHeaders.set(Messages.HTTP_HEADER_WARNING.getDescription(), msg.formatWithPrefix(orderId));
+				return new ResponseEntity<>(ro, responseHeaders, HttpStatus.NOT_MODIFIED);
+			}
+		}
+		String message = Messages.ORDER_NOT_EXIST.formatWithPrefix(orderId);
+		logger.error(message);
     	HttpHeaders responseHeaders = new HttpHeaders();
-    	responseHeaders.set(HTTP_HEADER_WARNING, message);
+    	responseHeaders.set(Messages.HTTP_HEADER_WARNING.getDescription(), message);
 		return new ResponseEntity<>(responseHeaders, HttpStatus.NOT_FOUND);
 	}
 
@@ -138,11 +273,62 @@ public class OrderControllerImpl implements OrderController {
 	 * 
 	 */
 	@Override
-	public ResponseEntity<RestOrder> cancelOrder(String cancelId) {
-    	String message = String.format(MSG_PREFIX + "Cancel not implemented (%d)", 2001);
-    	logger.error(message);
+	public ResponseEntity<RestOrder> cancelOrder(String orderId) {
+		ProcessingOrder order = this.findOrder(orderId);
+		if (order != null) {
+			Messages msg = orderUtil.cancel(order);
+			if (msg.isTrue()) {
+				// canceled
+				String message = msg.formatWithPrefix(orderId);
+				RestOrder ro = RestUtil.createRestOrder(order);
+				HttpHeaders responseHeaders = new HttpHeaders();
+				responseHeaders.set(Messages.HTTP_HEADER_SUCCESS.getDescription(), message);
+				return new ResponseEntity<>(ro, responseHeaders, HttpStatus.OK);
+			} else {
+				// already running or at end, could not cancel
+				String message = msg.formatWithPrefix(orderId);
+				RestOrder ro = RestUtil.createRestOrder(order);
+				HttpHeaders responseHeaders = new HttpHeaders();
+				responseHeaders.set(Messages.HTTP_HEADER_WARNING.getDescription(), message);
+				return new ResponseEntity<>(ro, responseHeaders, HttpStatus.NOT_MODIFIED);
+			}
+		}
+		String message = Messages.ORDER_NOT_EXIST.formatWithPrefix(orderId);
+		logger.error(message);
     	HttpHeaders responseHeaders = new HttpHeaders();
-    	responseHeaders.set(HTTP_HEADER_WARNING, message);
+		responseHeaders.set(Messages.HTTP_HEADER_WARNING.getDescription(), message);
+		return new ResponseEntity<>(responseHeaders, HttpStatus.NOT_FOUND);
+	}
+
+	/**
+	 * Close prcessing order of id
+	 * 
+	 */
+	@Override
+	public ResponseEntity<RestOrder> closeOrder(String orderId) {
+		ProcessingOrder order = this.findOrder(orderId);
+		if (order != null) {
+			Messages msg = orderUtil.close(order);
+			if (msg.isTrue()) {
+				// canceled
+				String message = msg.formatWithPrefix(orderId);
+				RestOrder ro = RestUtil.createRestOrder(order);
+				HttpHeaders responseHeaders = new HttpHeaders();
+				responseHeaders.set(Messages.HTTP_HEADER_SUCCESS.getDescription(), message);
+				return new ResponseEntity<>(ro, responseHeaders, HttpStatus.OK);
+			} else {
+				// already running or at end, could not cancel
+				String message = msg.formatWithPrefix(orderId);
+				RestOrder ro = RestUtil.createRestOrder(order);
+				HttpHeaders responseHeaders = new HttpHeaders();
+				responseHeaders.set(Messages.HTTP_HEADER_WARNING.getDescription(), message);
+				return new ResponseEntity<>(ro, responseHeaders, HttpStatus.NOT_MODIFIED);
+			}
+		}
+		String message = Messages.ORDER_NOT_EXIST.formatWithPrefix(orderId);
+		logger.error(message);
+    	HttpHeaders responseHeaders = new HttpHeaders();
+		responseHeaders.set(Messages.HTTP_HEADER_WARNING.getDescription(), message);
 		return new ResponseEntity<>(responseHeaders, HttpStatus.NOT_FOUND);
 	}
 
@@ -151,11 +337,28 @@ public class OrderControllerImpl implements OrderController {
 	 * 
 	 */
 	@Override
-	public ResponseEntity<RestOrder> suspendOrder(String suspendId) {
-    	String message = String.format(MSG_PREFIX + "Suspend not implemented (%d)", 2001);
-    	logger.error(message);
+	public ResponseEntity<RestOrder> suspendOrder(String orderId) {
+		ProcessingOrder order = this.findOrder(orderId);
+		if (order != null) {
+			Messages msg = orderUtil.suspend(order);
+			if (msg.isTrue()) {
+				// canceled
+				RestOrder ro = RestUtil.createRestOrder(order);
+				HttpHeaders responseHeaders = new HttpHeaders();
+				responseHeaders.set(Messages.HTTP_HEADER_SUCCESS.getDescription(), msg.formatWithPrefix(orderId));
+				return new ResponseEntity<>(ro, responseHeaders, HttpStatus.OK);
+			} else {
+				// already running or at end, could not suspend
+				RestOrder ro = RestUtil.createRestOrder(order);
+				HttpHeaders responseHeaders = new HttpHeaders();
+				responseHeaders.set(Messages.HTTP_HEADER_WARNING.getDescription(), msg.formatWithPrefix(orderId));
+				return new ResponseEntity<>(ro, responseHeaders, HttpStatus.NOT_MODIFIED);
+			}
+		}
+		String message = Messages.ORDER_NOT_EXIST.formatWithPrefix(orderId);
+		logger.error(message);
     	HttpHeaders responseHeaders = new HttpHeaders();
-    	responseHeaders.set(HTTP_HEADER_WARNING, message);
+		responseHeaders.set(Messages.HTTP_HEADER_WARNING.getDescription(), message);
 		return new ResponseEntity<>(responseHeaders, HttpStatus.NOT_FOUND);
 	}
 
@@ -178,53 +381,5 @@ public class OrderControllerImpl implements OrderController {
 		return order;
 	}
 
-	private RestOrder createAndCopyToRestOrder(ProcessingOrder po) {
-		RestOrder ro = new RestOrder();
-		if (po != null) {
-			ro.setId(po.getId());
-			ro.setIdentifier(po.getIdentifier());
-			if (po.getExecutionTime() != null) {
-				ro.setExecutionTime(Date.from(po.getExecutionTime()));
-			}
-			for (ConfiguredProcessor cp : po.getRequestedConfiguredProcessors()) {
-				ro.getConfiguredProcessors().add(cp.getIdentifier());
-			}
-			for (Entry<String, Parameter> entry : po.getFilterConditions().entrySet()) {
-				ro.getFilterConditions().add(new RestParameter(entry.getKey(), entry.getValue().getParameterType().toString(), entry.getValue().getStringValue()));
-			}
-			for (ProductClass pc : po.getInputProductClasses()) {
-				ro.getInputProductClasses().add(pc.getProductType());
-			}
-			ro.setMissionCode(po.getMission().getCode());
-			// orbits
-			for (Orbit o : po.getRequestedOrbits()) {
-				ro.getOrbits().add(new RestOrbitQuery(o.getSpacecraft().getCode(), (long) o.getOrbitNumber(), (long) o.getOrbitNumber()));
-			}
-			ro.setOrderState(po.getOrderState().toString());
-			ro.setOutputFileClass(po.getOutputFileClass());
-			for (Entry<String, Parameter> entry : po.getOutputParameters().entrySet()) {
-				ro.getOutputParameters().add(new RestParameter(entry.getKey(), entry.getValue().getParameterType().toString(), entry.getValue().getStringValue()));
-			}
-			ro.setProcessingMode(po.getProcessingMode());
-			for (ProductClass pc : po.getRequestedProductClasses()) {
-				ro.getRequestedProductClasses().add(pc.getProductType());
-			}
-			if (po.getSliceDuration() != null) {
-				ro.setSliceDuration(po.getSliceDuration().getSeconds());
-			}
-			if (po.getSliceOverlap() != null) {
-				ro.setSliceOverlap(po.getSliceOverlap().getSeconds());
-			}
-			ro.setSlicingType(po.getSlicingType().toString());
-			if (po.getStartTime() != null) {
-				ro.setStartTime(Date.from(po.getStartTime()));
-			}
-			if (po.getStopTime() != null) {
-				ro.setStopTime(Date.from(po.getStopTime()));
-			}
-			ro.setVersion((long) po.getVersion());
-		}			
-		return ro;
-	}
 	
 }

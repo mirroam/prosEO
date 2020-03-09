@@ -1,5 +1,7 @@
 /**
  * KubeConfig.java
+ * 
+ * © 2019 Prophos Informatik GmbH
  */
 package de.dlr.proseo.planner.kubernetes;
 
@@ -12,10 +14,14 @@ import java.util.concurrent.TimeUnit;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
 
 import de.dlr.proseo.model.ProcessingFacility;
+import de.dlr.proseo.planner.Messages;
 import de.dlr.proseo.planner.rest.model.PlannerPod;
 import de.dlr.proseo.planner.rest.model.PodKube;
+import de.dlr.proseo.planner.util.UtilService;
 import io.kubernetes.client.ApiClient;
 import io.kubernetes.client.ApiException;
 import io.kubernetes.client.Configuration;
@@ -24,30 +30,40 @@ import io.kubernetes.client.apis.CoreV1Api;
 import io.kubernetes.client.models.V1DeleteOptions;
 import io.kubernetes.client.models.V1Job;
 import io.kubernetes.client.models.V1JobList;
+import io.kubernetes.client.models.V1Node;
+import io.kubernetes.client.models.V1NodeList;
 import io.kubernetes.client.models.V1Pod;
 import io.kubernetes.client.models.V1PodList;
+import io.kubernetes.client.models.V1Taint;
 import io.kubernetes.client.util.Config;
 
 /**
  * Represents the connection to a Kubernetes API 
  * 
- * @author melchinger
+ * @author Ernst Melchinger
  *
  */
+@Component
 public class KubeConfig {
 
 	private static Logger logger = LoggerFactory.getLogger(KubeConfig.class);
 	
 	private HashMap<String, KubeJob> kubeJobList = null;
 	
+	private V1NodeList kubeNodes = null;
+	
+	private int workerCnt = 0;
+	
 	private ApiClient client;
 	private CoreV1Api apiV1;
 	private BatchV1Api batchApiV1;
 	private String id;
+	private long longId;
 	private String description;
 	private String url;
 	private String storageManagerUrl;
 	private ProcessingFacility processingFacility;
+	private int nodesDelta = 0;
 	
 	/**
 	 * @return the processingFacility
@@ -76,8 +92,12 @@ public class KubeConfig {
 	 * @param pf the ProcessingFacility
 	 */
 
+	public KubeConfig () {
+	}
+
 	public KubeConfig (ProcessingFacility pf) {
 		id = pf.getName();
+		longId = pf.getId();
 		description = pf.getDescription();
 		url = pf.getProcessingEngineUrl();
 		storageManagerUrl = pf.getStorageManagerUrl();
@@ -112,6 +132,13 @@ public class KubeConfig {
 		return batchApiV1;
 	}
 	
+	/**
+	 * @return the workerCnt
+	 */
+	public int getWorkerCnt() {
+		return workerCnt;
+	}
+
 	/**
 	 * Connect to the Kubernetes cluster
 	 * 
@@ -162,7 +189,8 @@ public class KubeConfig {
 							kubeJobList.put(kj.getJobName(), kj);
 						}
 					}
-					
+					// get node info
+					getNodeInfo();
 				} catch (ApiException e) {
 					// message handled in caller
 					if (e.getCause() == null || e.getCause().getClass() != ConnectException.class) {
@@ -188,6 +216,10 @@ public class KubeConfig {
 	    }		
 	}
 
+	public boolean couldJobRun() {
+		return (kubeJobList.size() < (getWorkerCnt() + nodesDelta));
+	}
+	
 	/**
 	 * Retrieve all pods of cluster
 	 * 
@@ -227,10 +259,29 @@ public class KubeConfig {
 	 * @param name of new job
 	 * @return new job or null
 	 */
+	@Transactional
 	public KubeJob createJob(String name, String stdoutLogLevel, String stderrLogLevel) {
 		int aKey = kubeJobList.size() + 1;
 		// KubeJob aJob = new KubeJob(aKey, null, "centos/perl-524-centos7", "/testdata/test3.pl", "perl", null);
 		KubeJob aJob = new KubeJob(Long.parseLong(name), "/testdata/test1.pl");
+		aJob = aJob.createJob(this, stdoutLogLevel, stderrLogLevel);
+		if (aJob != null) {
+			kubeJobList.put(aJob.getJobName(), aJob);
+		}
+		return aJob;
+	}
+
+	/**
+	 * Create a new job on cluster
+	 * 
+	 * @param name of new job
+	 * @return new job or null
+	 */
+	@Transactional
+	public KubeJob createJob(long id, String stdoutLogLevel, String stderrLogLevel) {
+		int aKey = kubeJobList.size() + 1;
+		// KubeJob aJob = new KubeJob(aKey, null, "centos/perl-524-centos7", "/testdata/test3.pl", "perl", null);
+		KubeJob aJob = new KubeJob(id, "/testdata/test1.pl");
 		aJob = aJob.createJob(this, stdoutLogLevel, stderrLogLevel);
 		if (aJob != null) {
 			kubeJobList.put(aJob.getJobName(), aJob);
@@ -265,7 +316,6 @@ public class KubeConfig {
 		try {
 			batchApiV1.deleteNamespacedJob(name, namespace, opt, null, null, 0, null, "Foreground");
 		} catch (Exception e) {
-			// TODO Auto-generated catch block
 			if (e instanceof IllegalStateException || e.getCause() instanceof IllegalStateException ) {
 				// nothing to do 
 				// cause there is a bug in Kubernetes API
@@ -273,6 +323,8 @@ public class KubeConfig {
 				e. printStackTrace();
 				return false;
 			}
+		} finally {
+			kubeJobList.remove(name);
 		}
 		return true;
 	}
@@ -290,7 +342,7 @@ public class KubeConfig {
 		} catch (ApiException e) {
 			if (e.getCode() == 404) {
 				// do nothing
-				logger.info("Job " + name + " not found, is it already finished?");
+				logger.warn(Messages.KUBECONFIG_JOB_NOT_FOUND.formatWithPrefix(name));
 				return null;			
 			} else {
 				e. printStackTrace();
@@ -343,6 +395,13 @@ public class KubeConfig {
 	 */
 	public String getId() {
 		return id;
+	}
+
+	/**
+	 * @return longId
+	 */
+	public long getLongId() {
+		return longId;
 	}
 	
 	/**
@@ -400,5 +459,37 @@ public class KubeConfig {
 			}
 		}
 		return false;
+	}
+	
+	public boolean getNodeInfo() {
+		kubeNodes = null;
+		workerCnt = 0;
+		try {
+			kubeNodes = apiV1.listNode(false, null, null, null, null, null, null, null, null);
+			if (kubeNodes != null) {
+				for (V1Node node : kubeNodes.getItems()) {
+					if (node.getSpec() != null) {
+						if (node.getSpec().getTaints() != null) {
+							for (V1Taint taint : node.getSpec().getTaints()) {
+								if (taint.getEffect() != null) {
+									if (!taint.getEffect().equalsIgnoreCase("NoSchedule") && !taint.getEffect().equalsIgnoreCase("NoExecute")) {
+										workerCnt++;
+									}
+								}
+							}
+						} else {
+							workerCnt++;
+						}
+					} else {
+						workerCnt++;
+					}
+				}						
+			}
+		} catch (ApiException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
+		
+		return workerCnt > 0;
 	}
 }

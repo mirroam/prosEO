@@ -225,7 +225,7 @@ public class CLIParser {
 		int maxParam = syntaxParameters.size() - 1;
 		if (parameterPosition > maxParam) {
 			// Check, whether last parameter is a repeatable parameter
-			if (syntaxParameters.get(maxParam).getRepeatable()) {
+			if (-1 < maxParam && syntaxParameters.get(maxParam).getRepeatable()) {
 				syntaxParameter = syntaxParameters.get(maxParam);
 			} else {
 				throw new ParseException(uiMsg(MSG_ID_TOO_MANY_PARAMETERS, syntaxCommand.getName()), 0);
@@ -280,6 +280,10 @@ public class CLIParser {
 		int parameterPosition = 0;
 		
 		for (String token: commandTokens) {
+			if (token.isBlank()) {
+				// Ignore multiple white space resulting in empty or blank tokens
+				continue;
+			}
 			if (token.startsWith("-")) {
 				// Handle token as option
 				if (parameterFound) {

@@ -54,6 +54,27 @@ resourceTypes:
           application/json:
             type: RestOrder[]
             example: !include ../../../../../model/src/main/resources/raml/examples/order-list.json
+  /{id}:
+    get:
+      description: Get processing order of id 
+      displayName: getOrder
+      responses:
+        200:
+          body:
+            application/json:
+              type: RestOrder
+              example: !include ../../../../../model/src/main/resources/raml/examples/order.json
+  /approve:
+    /{id}:
+      patch:
+        description: Approve processing order of id 
+        displayName: approveOrder
+        responses:
+          200:
+            body:
+              application/json:
+                type: RestOrder
+                example: !include ../../../../../model/src/main/resources/raml/examples/order.json
   /plan:
     /{id}:
       put:
@@ -78,11 +99,33 @@ resourceTypes:
               application/json:
                 type: RestOrder
                 example: !include ../../../../../model/src/main/resources/raml/examples/order.json
+  /reset:
+    /{id}:
+      patch:
+        description: Reset processing order of id 
+        displayName: resetOrder
+        responses:
+          200:
+            body:
+              application/json:
+                type: RestOrder
+                example: !include ../../../../../model/src/main/resources/raml/examples/order.json
   /cancel:
     /{id}:
       patch:
         description: Cancel processing order of id 
         displayName: cancelOrder
+        responses:
+          200:
+            body:
+              application/json:
+                type: RestOrder
+                example: !include ../../../../../model/src/main/resources/raml/examples/order.json
+  /close:
+    /{id}:
+      patch:
+        description: Close processing order of id 
+        displayName: closeOrder
         responses:
           200:
             body:
@@ -108,6 +151,10 @@ resourceTypes:
     displayName: getJobs
     queryParameters:
       state?: string
+      orderid?: 
+        type: integer
+        format: long
+        description: The persistent id of the processing order
     responses:
       200:
         body:
@@ -118,27 +165,6 @@ resourceTypes:
     get:
       description: Get production planner job
       displayName: getJob
-      responses:
-        200:
-          body:
-            application/json:
-              type: RestJob
-              example: !include ../../../../../model/src/main/resources/raml/examples/job.json
-    post:
-      description: Create production planner job
-      displayName: createJob
-      queryParameters:
-        facility?:
-          type: string
-      responses:
-        200:
-          body:
-            application/json:
-              type: RestJob
-              example: !include ../../../../../model/src/main/resources/raml/examples/job.json
-    delete:
-      description: Delete production planner job
-      displayName: deleteJob
       responses:
         200:
           body:
@@ -204,24 +230,6 @@ resourceTypes:
             application/json:
               type: RestJobStep
               example: !include ../../../../../model/src/main/resources/raml/examples/jobstep.json
-    post:
-      description: Create production planner jobstep
-      displayName: createJobStep
-      responses:
-        200:
-          body:
-            application/json:
-              type: RestJobStep
-              example: !include ../../../../../model/src/main/resources/raml/examples/jobstep.json
-    delete:
-      description: Delete production planner jobstep
-      displayName: deleteJobStep
-      responses:
-        200:
-          body:
-            application/json:
-              type: RestJobStep
-              example: !include ../../../../../model/src/main/resources/raml/examples/jobstep.json
   /resume:
     /{id}:
       patch:
@@ -274,49 +282,6 @@ resourceTypes:
             application/json:
               type: RestProcessingFacility
               example: !include ../../../../../model/src/main/resources/raml/examples/processingfacility.json
-    /pod:
-      /{podname}:
-        get:
-          description: Get jobstep/pod for test purpose
-          responses:
-            200:
-              body:
-                application/json:
-                  type: PlannerPod
-        post:
-          description: Create jobstep/pod for test purpose
-          queryParameters:
-            stdoutLogLevel?:
-              type: string
-              enum: [ DEBUG, INFO, PROGRESS, WARNING, ERROR ]
-            stderrLogLevel?:
-              type: string
-              enum: [ DEBUG, INFO, PROGRESS, WARNING, ERROR ]
-          responses:
-            201:
-              body:
-                application/json:
-                  type: RestJobStep
-    /pods:
-      get: 
-        description: Get pods on processing facility
-        responses:
-          200:
-            body:
-              application/json:
-                type: PlannerPod[]
-      /{status}:
-        get: 
-          description: Get pods on processing facility
-          responses:
-            200:
-              body:
-                application/json:
-                  type: PlannerPod[]
-        delete:
-          description: Delete pods on processing facility
-          responses:
-            200:
     /finish:
       /{podname}:
         patch:

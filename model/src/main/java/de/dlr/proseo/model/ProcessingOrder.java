@@ -22,6 +22,7 @@ import javax.persistence.ElementCollection;
 import javax.persistence.Entity;
 import javax.persistence.EnumType;
 import javax.persistence.Enumerated;
+import javax.persistence.FetchType;
 import javax.persistence.Index;
 import javax.persistence.ManyToMany;
 import javax.persistence.ManyToOne;
@@ -123,7 +124,7 @@ public class ProcessingOrder extends PersistentObject {
 	private List<Orbit> requestedOrbits = new ArrayList<>();
 	
 	/** The processing jobs belonging to this order */	
-	@OneToMany(cascade = CascadeType.ALL, orphanRemoval = true, mappedBy = "processingOrder")
+	@OneToMany(cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY, mappedBy = "processingOrder")
 	private Set<Job> jobs = new HashSet<>();
 	
 	/**
@@ -141,7 +142,10 @@ public class ProcessingOrder extends PersistentObject {
 	 * <li>PLANNED -&gt; FAILED: The order was cancelled by the operator</li>
 	 * <li>COMPLETED/FAILED -&gt;; CLOSED: Delivery/failure has been acknowledged by customer and/or order fee has been paid</li>
 	 * </ol>
+	 * 
+	 * Deprecated: Use de.dlr.proseo.model.enums.OrderState instead
 	 */
+	@Deprecated
 	public enum OrderState { INITIAL, APPROVED, PLANNED, RELEASED, RUNNING, SUSPENDING, COMPLETED, FAILED, CLOSED };
 	
 	/**
@@ -156,7 +160,10 @@ public class ProcessingOrder extends PersistentObject {
 	 * <li>TIME_SLICE: Create jobs in fixed time slices, starting with the start time of the order time interval and ending
 	 *            no earlier than the end of the time interval</li>
 	 * </ul>
+	 * 
+	 * Deprecated: Use de.dlr.proseo.model.enums.OrderSlicingType instead
 	 */
+	@Deprecated
 	public enum OrderSlicingType { ORBIT, CALENDAR_DAY, TIME_SLICE };
 
 	/**

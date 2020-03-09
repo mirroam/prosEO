@@ -21,8 +21,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClientResponseException;
 
-import de.dlr.proseo.model.Orbit;
 import de.dlr.proseo.model.rest.model.RestProduct;
+import de.dlr.proseo.model.util.OrbitTimeFormatter;
 import de.dlr.proseo.ui.backend.ServiceConfiguration;
 import de.dlr.proseo.ui.backend.ServiceConnection;
 import de.dlr.proseo.ui.backend.LoginManager;
@@ -88,7 +88,7 @@ public class IngestorCommandRunner {
 		
 		/* Check command options */
 		File productFile = null;
-		String productFileFormat = null;
+		String productFileFormat = CLIUtil.FILE_FORMAT_JSON;
 		for (ParsedOption option: createCommand.getOptions()) {
 			switch(option.getName()) {
 			case "file":
@@ -163,7 +163,7 @@ public class IngestorCommandRunner {
 				return;
 			}
 			try {
-				restProduct.setSensingStartTime(Orbit.orbitTimeFormatter.format(Instant.parse(response + "Z"))); // no time zone in input expected
+				restProduct.setSensingStartTime(OrbitTimeFormatter.format(Instant.parse(response + "Z"))); // no time zone in input expected
 			} catch (DateTimeParseException e) {
 				System.err.println(uiMsg(MSG_ID_INVALID_TIME, response));
 			}
@@ -176,7 +176,7 @@ public class IngestorCommandRunner {
 				return;
 			}
 			try {
-				restProduct.setSensingStopTime(Orbit.orbitTimeFormatter.format(Instant.parse(response + "Z"))); // no time zone in input expected
+				restProduct.setSensingStopTime(OrbitTimeFormatter.format(Instant.parse(response + "Z"))); // no time zone in input expected
 			} catch (DateTimeParseException e) {
 				System.err.println(uiMsg(MSG_ID_INVALID_TIME, response));
 			}
@@ -189,7 +189,7 @@ public class IngestorCommandRunner {
 				return;
 			}
 			try {
-				restProduct.setSensingStopTime(Orbit.orbitTimeFormatter.format(Instant.parse(response + "Z"))); // no time zone in input expected
+				restProduct.setSensingStopTime(OrbitTimeFormatter.format(Instant.parse(response + "Z"))); // no time zone in input expected
 			} catch (DateTimeParseException e) {
 				System.err.println(uiMsg(MSG_ID_INVALID_TIME, response));
 			}
@@ -202,7 +202,7 @@ public class IngestorCommandRunner {
 				return;
 			}
 			try {
-				restProduct.setGenerationTime(Orbit.orbitTimeFormatter.format(Instant.parse(response + "Z"))); // no time zone in input expected
+				restProduct.setGenerationTime(OrbitTimeFormatter.format(Instant.parse(response + "Z"))); // no time zone in input expected
 			} catch (DateTimeParseException e) {
 				System.err.println(uiMsg(MSG_ID_INVALID_TIME, response));
 			}
@@ -316,7 +316,7 @@ public class IngestorCommandRunner {
 
 		/* Check command options */
 		File productFile = null;
-		String productFileFormat = null;
+		String productFileFormat = CLIUtil.FILE_FORMAT_JSON;
 		boolean isDeleteAttributes = false;
 		for (ParsedOption option: updateCommand.getOptions()) {
 			switch(option.getName()) {
@@ -524,7 +524,7 @@ public class IngestorCommandRunner {
 
 		/* Check command options */
 		File productFile = null;
-		String productFileFormat = null;
+		String productFileFormat = CLIUtil.FILE_FORMAT_JSON;
 		for (ParsedOption option: ingestCommand.getOptions()) {
 			switch(option.getName()) {
 			case "file":
@@ -595,6 +595,7 @@ public class IngestorCommandRunner {
 		/* Check that user is logged in */
 		if (null == loginManager.getUser()) {
 			System.err.println(uiMsg(MSG_ID_USER_NOT_LOGGED_IN, command.getName()));
+			return;
 		}
 		
 		/* Check argument */

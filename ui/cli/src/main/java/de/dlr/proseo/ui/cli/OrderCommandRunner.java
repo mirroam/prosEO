@@ -26,8 +26,8 @@ import org.springframework.web.client.RestClientResponseException;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
-import de.dlr.proseo.model.ProcessingOrder.OrderSlicingType;
-import de.dlr.proseo.model.ProcessingOrder.OrderState;
+import de.dlr.proseo.model.enums.OrderSlicingType;
+import de.dlr.proseo.model.enums.OrderState;
 import de.dlr.proseo.model.rest.model.RestOrbitQuery;
 import de.dlr.proseo.model.rest.model.RestOrder;
 import de.dlr.proseo.ui.backend.ServiceConfiguration;
@@ -161,7 +161,7 @@ public class OrderCommandRunner {
 		
 		/* Check command options */
 		File orderFile = null;
-		String orderFileFormat = null;
+		String orderFileFormat = CLIUtil.FILE_FORMAT_JSON;
 		for (ParsedOption option: createCommand.getOptions()) {
 			switch(option.getName()) {
 			case "file":
@@ -463,7 +463,7 @@ public class OrderCommandRunner {
 		
 		/* Check command options */
 		File orderFile = null;
-		String orderFileFormat = null;
+		String orderFileFormat = CLIUtil.FILE_FORMAT_JSON;
 		boolean isDeleteAttributes = false;
 		for (ParsedOption option: updateCommand.getOptions()) {
 			switch(option.getName()) {
@@ -538,7 +538,7 @@ public class OrderCommandRunner {
 			String message = null;
 			switch (e.getRawStatusCode()) {
 			case org.apache.http.HttpStatus.SC_NOT_FOUND:
-				message = uiMsg(MSG_ID_ORDER_NOT_FOUND, restOrder.getIdentifier());
+				message = uiMsg(MSG_ID_ORDER_NOT_FOUND, updatedOrder.getIdentifier());
 				break;
 			case org.apache.http.HttpStatus.SC_UNAUTHORIZED:
 				message = uiMsg(MSG_ID_NOT_AUTHORIZED, loginManager.getUser(), ORDERS, loginManager.getMission());
@@ -1126,6 +1126,7 @@ public class OrderCommandRunner {
 		/* Check that user is logged in */
 		if (null == loginManager.getUser()) {
 			System.err.println(uiMsg(MSG_ID_USER_NOT_LOGGED_IN, command.getName()));
+			return;
 		}
 		
 		/* Check argument */

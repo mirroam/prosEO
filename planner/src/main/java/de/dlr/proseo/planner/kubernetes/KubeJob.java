@@ -1,15 +1,21 @@
 /**
+ * KubeJob.java
  * 
+ * © 2019 Prophos Informatik GmbH
  */
+
 package de.dlr.proseo.planner.kubernetes;
 
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import org.joda.time.DateTime;
@@ -17,19 +23,27 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
+
 import de.dlr.proseo.model.service.RepositoryService;
+import de.dlr.proseo.model.Job.JobState;
 import de.dlr.proseo.model.JobStep;
 import de.dlr.proseo.model.JobStep.JobStepState;
 import de.dlr.proseo.model.JobStep.StdLogLevel;
 import de.dlr.proseo.model.Product;
 import de.dlr.proseo.model.joborder.JobOrder;
+import de.dlr.proseo.planner.Messages;
 import de.dlr.proseo.planner.ProductionPlanner;
 import de.dlr.proseo.planner.ProductionPlannerConfiguration;
 import de.dlr.proseo.planner.dispatcher.JobDispatcher;
 import de.dlr.proseo.planner.rest.JobControllerImpl;
 import de.dlr.proseo.planner.rest.model.PodKube;
+import de.dlr.proseo.planner.util.JobStepUtil;
+import de.dlr.proseo.planner.util.JobUtil;
+import de.dlr.proseo.planner.util.UtilService;
 import io.kubernetes.client.ApiException;
 import io.kubernetes.client.Copy;
+import io.kubernetes.client.custom.Quantity;
 import io.kubernetes.client.models.V1Job;
 import io.kubernetes.client.models.V1JobBuilder;
 import io.kubernetes.client.models.V1JobCondition;
@@ -37,11 +51,12 @@ import io.kubernetes.client.models.V1JobSpec;
 import io.kubernetes.client.models.V1JobSpecBuilder;
 import io.kubernetes.client.models.V1Pod;
 import io.kubernetes.client.models.V1PodList;
+import io.kubernetes.client.models.V1ResourceRequirements;
 
 /**
  * A KubeJob describes the complete information to run a Kubernetes job.
  * 
- * @author melchinger
+ * @author Ernst Melchinger
  *
  */
 
@@ -50,6 +65,7 @@ import io.kubernetes.client.models.V1PodList;
 public class KubeJob {
 	
 	private static Logger logger = LoggerFactory.getLogger(KubeJob.class);
+	
 	/**
 	 * The job id of DB
 	 */
@@ -113,7 +129,7 @@ public class KubeJob {
 	 * @return the podName
 	 */
 	public ArrayList<String> getPodNames() {
-		if (podNames == null) {
+		if (podNames == null || podNames.isEmpty()) {
 			searchPod();
 		}
 		return podNames;
@@ -186,15 +202,7 @@ public class KubeJob {
 		command = cmd;
 		jobOrderFileName = jobOrderFN;
 		podNames = new ArrayList<String>();
-//		try {
-//            jobOrderString = ""; // Files.readString(Paths.get("C:\\usr\\prosEO\\workspace-proseo\\prosEO\\sample-wrapper\\src\\test\\resources\\JobOrder.608109247_KNMI-L2_CO.xml"));
-//        } catch (FileNotFoundException e) {
-//			// TODO Auto-generated catch block
-//			e.printStackTrace();
-//		} catch (IOException e) {
-//			// TODO Auto-generated catch block
-//			e.printStackTrace();
-//		}
+
 		if (args != null) {
 			this.args.addAll(args);
 		}
@@ -255,6 +263,7 @@ public class KubeJob {
 	 * @param aKubeConfig The processing facility
 	 * @return The kube job
 	 */
+	@Transactional
 	public KubeJob createJob(KubeConfig aKubeConfig, String stdoutLogLevel, String stderrLogLevel) {	
 		kubeConfig = aKubeConfig;
 		JobOrder jobOrder = null;
@@ -286,6 +295,13 @@ public class KubeJob {
 					return null;
 				}
 				imageName = jobStep.getOutputProduct().getConfiguredProcessor().getProcessor().getDockerImage();
+				// Use Java style Map (as opposed to Scala's Map class)
+				
+				// Build a ResourceRequirements object
+				V1ResourceRequirements reqs = new V1ResourceRequirements();
+				reqs.putRequestsItem("cpu", new Quantity("1"))
+					.putRequestsItem("memory", new Quantity("1500Mi"));
+				
 				V1JobSpec jobSpec = new V1JobSpecBuilder()
 						.withNewTemplate()
 						.withNewMetadata()
@@ -347,6 +363,7 @@ public class KubeJob {
 						.withName("ramdisk")
 						.withMountPath("/mnt/ramdisk")
 						.endVolumeMount()
+						.withResources(reqs)
 						.endContainer()
 						.addNewVolume()
 						.withName("ramdisk")
@@ -369,15 +386,11 @@ public class KubeJob {
 						.withSpec(jobSpec)
 						.build();
 				try {
-
-
 					if (!js.isEmpty()) {
 						aKubeConfig.getBatchApiV1().createNamespacedJob (aKubeConfig.getNamespace(), job, null, null, null);
 						searchPod();
-
-						jobStep.setJobStepState(JobStepState.RUNNING);	
-						RepositoryService.getJobStepRepository().save(jobStep);
-						logger.info("Job " + kubeConfig.getId() + "/" + jobName + " created");
+						UtilService.getJobStepUtil().startJobStep(jobStep);
+						logger.info(Messages.KUBEJOB_CREATED.formatWithPrefix(kubeConfig.getId(), jobName));
 					}
 				} catch (ApiException e1) {
 					// TODO Auto-generated catch block
@@ -400,6 +413,13 @@ public class KubeJob {
 		}
 	}	
 	
+	/**
+	 * @return the kubeConfig
+	 */
+	public KubeConfig getKubeConfig() {
+		return kubeConfig;
+	}
+
 	/**
 	 * Search pod for job and set podName
 	 */
@@ -495,7 +515,9 @@ public class KubeJob {
 			toFini.start();
 		}
 	}	
-	public boolean getFinishInfo(String aJobName) {
+	
+	@Transactional
+	public boolean getInfo(String aJobName) {
 		boolean success = false;
 		if (kubeConfig != null && kubeConfig.isConnected() && aJobName != null) {
 			V1Job aJob = kubeConfig.getV1Job(aJobName);
@@ -566,18 +588,29 @@ public class KubeJob {
 					} catch (Exception e) {
 						e.printStackTrace();						
 					}
-					RepositoryService.getJobStepRepository().save(js.get());
-					Optional<JobStep> jsa = RepositoryService.getJobStepRepository().findById(jobStepId);
-					if (jsa.isPresent()) {
-						jsa.get();
-					}
+					RepositoryService.getJobStepRepository().save(js.get());	
 				}
+			}
+		}
+		return success;
+	}
+
+	
+	@Transactional
+	public boolean getFinishInfo(String aJobName) {
+		boolean success = false;
+		success = getInfo(aJobName);
+		if (success) {
+			Long jobStepId = this.getJobId();
+			Optional<JobStep> js = RepositoryService.getJobStepRepository().findById(jobStepId);
+			if (js.isPresent()) {							
+				UtilService.getJobStepUtil().checkFinish(js.get());
 			}
 		}
 		if (success) {
 			// delete kube job
 			kubeConfig.deleteJob(aJobName);
-			logger.info("Job " + kubeConfig.getId() + "/" + aJobName + " finished");
+			logger.info(Messages.KUBEJOB_FINISHED.formatWithPrefix(kubeConfig.getId(), aJobName));
 		}
 		return success;
 	}

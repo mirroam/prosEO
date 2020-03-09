@@ -6,7 +6,6 @@
 package de.dlr.proseo.ui.backend;
 
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.autoconfigure.domain.EntityScan;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Configuration;
 
@@ -17,7 +16,6 @@ import org.springframework.context.annotation.Configuration;
  */
 @Configuration
 @ConfigurationProperties(prefix="proseo")
-@EntityScan(basePackages = "de.dlr.proseo.model")
 public class ServiceConfiguration {
 	
 	/** The user name to use for prosEO component logins */
@@ -28,6 +26,10 @@ public class ServiceConfiguration {
 	@Value("${proseo.password}")
 	private String proseoPassword;
 
+	/** The URL of the prosEO User Manager */
+	@Value("${proseo.userManager.url}")
+	private String userManagerUrl;
+	
 	/** The URL of the prosEO Production Planner */
 	@Value("${proseo.productionPlanner.url}")
 	private String productionPlannerUrl;
@@ -64,6 +66,15 @@ public class ServiceConfiguration {
 	 */
 	public String getProseoPassword() {
 		return proseoPassword;
+	}
+
+	/**
+	 * Gets the URL of the prosEO User Manager component
+	 * 
+	 * @return the userManagerUrl
+	 */
+	public String getUserManagerUrl() {
+		return userManagerUrl;
 	}
 
 	/**

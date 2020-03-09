@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<restMockResponse>
+    <body>[&#13;
+    {&#13;
+        "id": 1198734,&#13;
+        "version": 5,&#13;
+        "missionCode": "S5P",&#13;
+        "processorName": "KNMI L2",&#13;
+        "processorVersion": "01.03.02",&#13;
+        "isTest": false,&#13;
+        "minDiskSpace": 1024,&#13;
+        "maxTime": 300,&#13;
+        "sensingTimeFlag": true,&#13;
+        "configuredProcessors": [ "KNMI L2 01.03.02 2019-03-30" ],&#13;
+        "tasks": [&#13;
+            {&#13;
+                "id": 234961,&#13;
+                "version": 1,&#13;
+                "taskName": "TROPNLL2",&#13;
+                "taskVersion": "01.03.02",&#13;
+                "isCritical": true,&#13;
+                "criticalityLevel": 100,&#13;
+                "numberOfCpus": 10,&#13;
+                "breakpointFileNames": []&#13;
+            }&#13;
+        ],&#13;
+        "dockerImage": "knmi-l2:01.03.02",&#13;
+        "dockerRunParameters": "-v /my/source/directory:/container/target/directory"&#13;
+    },&#13;
+    {&#13;
+        "id": 11987345,&#13;
+        "version": 57,&#13;
+        "missionCode": "S5P",&#13;
+        "processorName": "DLR L2 (upas)",&#13;
+        "processorVersion": "01.01.07",&#13;
+        "isTest": false,&#13;
+        "minDiskSpace": 2048,&#13;
+        "maxTime": 240,&#13;
+        "sensingTimeFlag": true,&#13;
+        "configuredProcessors": [ "DLR L2 01.01.07 2019-03-30" ],&#13;
+        "tasks": [&#13;
+            {&#13;
+                "id": 234962,&#13;
+                "version": 1,&#13;
+                "taskName": "UPAS",&#13;
+                "taskVersion": "01.01.07",&#13;
+                "isCritical": true,&#13;
+                "criticalityLevel": 100,&#13;
+                "numberOfCpus": 10,&#13;
+                "breakpointFileNames": []&#13;
+            }&#13;
+        ],&#13;
+        "dockerImage": "upas:01.01.07",&#13;
+        "dockerRunParameters": "-v /my/path/to/support_data:/container/path/to/support_data"&#13;
+    }&#13;
+]&#13;
+</body>
+    <contentEncodings/>
+    <headerQueries/>
+    <httpHeaders/>
+    <httpStatusCode>200</httpStatusCode>
+    <id>SaqPSJ</id>
+    <jsonPathExpressions/>
+    <methodId>xwTT6S</methodId>
+    <name>list</name>
+    <parameterQueries/>
+    <status>ENABLED</status>
+    <usingExpressions>false</usingExpressions>
+    <xpathExpressions/>
+</restMockResponse>

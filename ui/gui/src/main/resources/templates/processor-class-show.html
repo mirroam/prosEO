@@ -31,6 +31,11 @@
   </head>
 <body class="text-center"style="background-image: url(background.jpg)">
   <div th:insert="fragments/navbar.html :: navigation-bar"></div>
+  <div sec:authorize="isAuthenticated()"> 
+    Logged user: <div th:text="${#authentication}" ></div>
+    Logged user: <div th:text="${#authentication.mission}" ></div>
+    Roles: <span sec:authentication="${#principal}"></span>
+</div>
 <div class="container-fluid">
 <form name = "prc-cls-shw" id="prc-cls-shw" action="/processor-class-show/get" method="get">
 <div class="input-group mb-3">

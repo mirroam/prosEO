@@ -7,10 +7,19 @@
         "fileClasses": [ "TEST", "OPER", "NRTI", "OFFL", "RPRO" ],
         "processingModes": [ "NRTI", "OFFL", "RPRO" ],
         "productFileTemplate": "S5P_${fileClass}_${productClass.missionType}.nc",
+        "processingCentre": "S5P-PDGS",
+        "productRetentionPeriod": 2592000,
+        "orderRetentionPeriod": 86400,
         "spacecrafts": [
             {
                 "code": "S5P",
-                "name": "Sentinel-5 Precursor"
+                "name": "Sentinel-5 Precursor",
+                "payloads": [
+                    {
+                        "name": "TROPOMI",
+                        "description": "The TROPOspheric Monitoring Instrument"
+                    }
+                ]
             }
         ]
     },

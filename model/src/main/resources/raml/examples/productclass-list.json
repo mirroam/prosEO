@@ -5,6 +5,7 @@
         "missionCode": "S5P",
         "productType": "L2__NPP___",
         "typeDescription": "Suomi-NPP VIIRS Clouds",
+        "processingLevel": "L2",
         "visibility": "PUBLIC",
         "defaultSlicingType": "ORBIT",
         "componentClasses": [ "NPP_BD3", "NPP_BD6", "NPP_BD7" ],
@@ -18,7 +19,7 @@
                 "filterConditions": [],
                 "targetProductClass": "NPP",
                 "sourceProductClass": "AUX_NPP",
-                "applicableConfiguredProcessors": [ "RAL L2 00.09.00 2018-02-25", "RAL L2 01.00.00 2018-04-26" ],
+                "configuredProcessors": [ "RAL L2 00.09.00 2018-02-25", "RAL L2 01.00.00 2018-04-26" ],
                 "simplePolicies": [
                     {
                         "id": 749254,
@@ -38,6 +39,7 @@
         "missionCode": "S5P",
         "productType": "L2__NP_BD3",
         "typeDescription": "Suomi-NPP VIIRS Clouds, band 3",
+        "processingLevel": "L2",
         "visibility": "PUBLIC",
         "defaultSlicingType": "ORBIT",
         "enclosingClass": "NPP",
@@ -51,7 +53,7 @@
                 "filterConditions": [],
                 "targetProductClass": "NPP_BD3",
                 "sourceProductClass": "L1B_RA_BD3",
-                "applicableConfiguredProcessors": [ "RAL L2 00.09.00 2018-02-25", "RAL L2 01.00.00 2018-04-26" ],
+                "configuredProcessors": [ "RAL L2 00.09.00 2018-02-25", "RAL L2 01.00.00 2018-04-26" ],
                 "simplePolicies": [
                     {
                         "id": 749255,

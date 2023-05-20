@@ -308,14 +308,18 @@ public class ProductFile extends PersistentObject {
 
 	@Override
 	public boolean equals(Object obj) {
+		// Object identity
 		if (this == obj)
 			return true;
-		if (!super.equals(obj))
-			return false;
+		
+		// Same database object
+		if (super.equals(obj))
+			return true;
+		
 		if (!(obj instanceof ProductFile))
 			return false;
 		ProductFile other = (ProductFile) obj;
-		return Objects.equals(processingFacility, other.processingFacility) && Objects.equals(product, other.product);
+		return Objects.equals(processingFacility, other.getProcessingFacility()) && Objects.equals(product, other.getProduct());
 	}
 
 	@Override

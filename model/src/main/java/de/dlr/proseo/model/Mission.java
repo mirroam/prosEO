@@ -5,7 +5,9 @@
  */
 package de.dlr.proseo.model;
 
+import java.time.Duration;
 import java.util.HashSet;
+import java.util.Objects;
 import java.util.Set;
 
 import javax.persistence.ElementCollection;
@@ -65,6 +67,28 @@ public class Mission extends PersistentObject {
 	 */
 	@org.hibernate.annotations.Type(type = "materialized_clob")
 	private String productFileTemplate;
+	
+	/**
+	 * An identifying string for the processing centre (organisation) operating this prosEO instance according to
+	 * mission-specific conventions
+	 */
+	private String processingCentre;
+	
+	/**
+	 * The default period of time for keeping products after their generation.
+	 * If not set for the mission or a processing order, automatic product deletion will not take place.
+	 * If set, must not be less than orderRetentionPeriod, otherwise products cannot be deleted, when reaching their eviction time.
+	 */
+	private Duration productRetentionPeriod;
+	
+	/**
+	 * The default period of time for keeping orders after their completion.
+	 * If not set for the mission, automatic order deletion will not take place.
+	 * If set, must not be greater than productRetentionPeriod, otherwise products cannot be deleted,
+	 * when reaching their eviction time.
+	 * Order deletion will only take place for orders with productionType SYSTEMATIC_PRODUCTION.
+	 */
+	private Duration orderRetentionPeriod;
 	
 	/** The spacecrafts this mission owns */
 	@OneToMany(mappedBy = "mission")
@@ -173,6 +197,60 @@ public class Mission extends PersistentObject {
 	}
 
 	/**
+	 * Gets the processing centre
+	 * 
+	 * @return the processing centre
+	 */
+	public String getProcessingCentre() {
+		return processingCentre;
+	}
+
+	/**
+	 * Sets the processing centre
+	 * 
+	 * @param processingCentre the processing centre to set
+	 */
+	public void setProcessingCentre(String processingCentre) {
+		this.processingCentre = processingCentre;
+	}
+
+	/**
+	 * Gets the default product retention period
+	 * 
+	 * @return the product retention period
+	 */
+	public Duration getProductRetentionPeriod() {
+		return productRetentionPeriod;
+	}
+
+	/**
+	 * Sets the default product retention period
+	 * 
+	 * @param productRetentionPeriod the product retention period to set
+	 */
+	public void setProductRetentionPeriod(Duration productRetentionPeriod) {
+		this.productRetentionPeriod = productRetentionPeriod;
+	}
+
+	/**
+	 * Gets the default order retention period
+	 * 
+	 * @return the order retention period
+	 */
+	public Duration getOrderRetentionPeriod() {
+		return orderRetentionPeriod;
+	}
+
+	/**
+	 * Sets the default order retention period
+	 * 
+	 * @param orderRetentionPeriod the order retention period to set
+	 */
+	public void setOrderRetentionPeriod(Duration orderRetentionPeriod) {
+		this.orderRetentionPeriod = orderRetentionPeriod;
+	}
+
+	/**
 	 * Gets the set of spacecrafts
 	 * 
 	 * @return the spacecrafts
@@ -246,27 +324,23 @@ public class Mission extends PersistentObject {
 
 	@Override
 	public int hashCode() {
-		final int prime = 31;
-		int result = super.hashCode();
-		result = prime * result + ((code == null) ? 0 : code.hashCode());
-		return result;
+		return code.hashCode();
 	}
 
 	@Override
 	public boolean equals(Object obj) {
+		// Object identity
 		if (this == obj)
 			return true;
-		if (!super.equals(obj))
-			return false;
+		
+		// Same database object
+		if (super.equals(obj))
+			return true;
+		
 		if (!(obj instanceof Mission))
 			return false;
 		Mission other = (Mission) obj;
-		if (code == null) {
-			if (other.code != null)
-				return false;
-		} else if (!code.equals(other.code))
-			return false;
-		return true;
+		return Objects.equals(code, other.getCode());
 	}
 
 	@Override

@@ -5,9 +5,7 @@
  */
 package de.dlr.proseo.procmgr.rest.model;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
+import de.dlr.proseo.logging.logger.ProseoLogger;
 import de.dlr.proseo.model.Task;
 
 /**
@@ -18,7 +16,7 @@ import de.dlr.proseo.model.Task;
 public class TaskUtil {
 
 	/** A logger for this class */
-	private static Logger logger = LoggerFactory.getLogger(TaskUtil.class);
+	private static ProseoLogger logger = new ProseoLogger(TaskUtil.class);
 	
 	/**
 	 * Convert a prosEO model processor task into a REST processor task
@@ -47,6 +45,9 @@ public class TaskUtil {
 		}
 		if (null != modelTask.getNumberOfCpus()) {
 			restTask.setNumberOfCpus(Long.valueOf(modelTask.getNumberOfCpus()));
+		}
+		if (null != modelTask.getMinMemory()) {
+			restTask.setMinMemory(modelTask.getMinMemory().longValue());
 		}
 		for (String breakpointFileName: modelTask.getBreakpointFileNames()) {
 			restTask.getBreakpointFileNames().add(breakpointFileName);
@@ -84,6 +85,9 @@ public class TaskUtil {
 		}
 		if (null != restTask.getNumberOfCpus()) {
 			modelTask.setNumberOfCpus(restTask.getNumberOfCpus().intValue());
+		}
+		if (null != restTask.getMinMemory()) {
+			modelTask.setMinMemory(restTask.getMinMemory().intValue());
 		}
 		for (String breakpointFileName: restTask.getBreakpointFileNames()) {
 			modelTask.getBreakpointFileNames().add(breakpointFileName);

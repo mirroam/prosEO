@@ -7,14 +7,13 @@ package de.dlr.proseo.prodclmgr.rest.model;
 
 import java.time.Duration;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
+import de.dlr.proseo.logging.logger.ProseoLogger;
 import de.dlr.proseo.model.ConfiguredProcessor;
 import de.dlr.proseo.model.ProductClass;
 import de.dlr.proseo.model.SimplePolicy;
 import de.dlr.proseo.model.SimpleSelectionRule;
 import de.dlr.proseo.model.enums.OrderSlicingType;
+import de.dlr.proseo.model.enums.ProcessingLevel;
 import de.dlr.proseo.model.enums.ProductVisibility;
 
 /**
@@ -25,7 +24,7 @@ import de.dlr.proseo.model.enums.ProductVisibility;
 public class ProductClassUtil {
 
 	/** A logger for this class */
-	private static Logger logger = LoggerFactory.getLogger(ProductClassUtil.class);
+	private static ProseoLogger logger = new ProseoLogger(ProductClassUtil.class);
 	
 	/**
 	 * Convert a prosEO model product class into a REST product class
@@ -49,6 +48,9 @@ public class ProductClassUtil {
 		}
 		restProductClass.setProductType(modelProductClass.getProductType());
 		restProductClass.setTypeDescription(modelProductClass.getDescription());
+		if (null != modelProductClass.getProcessingLevel()) {
+			restProductClass.setProcessingLevel(modelProductClass.getProcessingLevel().toString());
+		}
 		if (null != modelProductClass.getVisibility()) {
 			restProductClass.setVisibility(modelProductClass.getVisibility().toString());
 		}
@@ -67,7 +69,6 @@ public class ProductClassUtil {
 		for (ProductClass componentClass: modelProductClass.getComponentClasses()) {
 			restProductClass.getComponentClasses().add(componentClass.getProductType());
 		}
-		Boolean first = true;
 		for (SimpleSelectionRule simpleSelectionRule: modelProductClass.getRequiredSelectionRules()) {
 			RestSimpleSelectionRule restSimpleSelectionRule = new RestSimpleSelectionRule();
 			restSimpleSelectionRule.setId(simpleSelectionRule.getId());
@@ -78,8 +79,8 @@ public class ProductClassUtil {
 			if (null != simpleSelectionRule.getSourceProductClass()) {
 				restSimpleSelectionRule.setSourceProductClass(simpleSelectionRule.getSourceProductClass().getProductType());
 			}
-			for (ConfiguredProcessor configuredProcessor: simpleSelectionRule.getApplicableConfiguredProcessors()) {
-				restSimpleSelectionRule.getApplicableConfiguredProcessors().add(configuredProcessor.getIdentifier());
+			for (ConfiguredProcessor configuredProcessor: simpleSelectionRule.getConfiguredProcessors()) {
+				restSimpleSelectionRule.getConfiguredProcessors().add(configuredProcessor.getIdentifier());
 			}
 			for (String filterConditionKey: simpleSelectionRule.getFilterConditions().keySet()) {
 				restSimpleSelectionRule.getFilterConditions().add(
@@ -131,6 +132,9 @@ public class ProductClassUtil {
 		
 		modelProductClass.setProductType(restProductClass.getProductType());
 		modelProductClass.setDescription(restProductClass.getTypeDescription());
+		if (null != restProductClass.getProcessingLevel()) {
+			modelProductClass.setProcessingLevel(ProcessingLevel.valueOf(restProductClass.getProcessingLevel()));
+		}
 		if (null != restProductClass.getVisibility()) {
 			modelProductClass.setVisibility(ProductVisibility.valueOf(restProductClass.getVisibility()));
 		}

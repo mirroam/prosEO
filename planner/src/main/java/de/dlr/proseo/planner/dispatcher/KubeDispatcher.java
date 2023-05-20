@@ -5,11 +5,11 @@
  */
 package de.dlr.proseo.planner.dispatcher;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.transaction.annotation.Transactional;
 
-import de.dlr.proseo.planner.Messages;
+import de.dlr.proseo.logging.logger.ProseoLogger;
+import de.dlr.proseo.logging.messages.GeneralMessage;
+import de.dlr.proseo.logging.messages.PlannerMessage;
 import de.dlr.proseo.planner.ProductionPlanner;
 import de.dlr.proseo.planner.kubernetes.KubeConfig;
 import de.dlr.proseo.planner.util.UtilService;
@@ -20,13 +20,13 @@ import de.dlr.proseo.planner.util.UtilService;
  * @author Ernst Melchinger
  *
  */
-@Transactional
+// @Transactional
 public class KubeDispatcher extends Thread {
 
 	/**
 	 * Logger for this class
 	 */
-	private static Logger logger = LoggerFactory.getLogger(KubeDispatcher.class);
+	private static ProseoLogger logger = new ProseoLogger(KubeDispatcher.class);
 	
 	/**
 	 * The planner instance 
@@ -49,10 +49,11 @@ public class KubeDispatcher extends Thread {
     private KubeConfig kubeConfig;
 
 	/** 
-	 * Create new KubeDispatcher for planner 
+	 * Create new KubeDispatcher for planner
+	 * 
 	 * @param p The planner
 	 * @param kc The kube config of facility
-	 * @param onlyRun 
+	 * @param onlyRun set to true to evaluate only runnable job steps or to false to check all job steps
 	 */
 	public KubeDispatcher(ProductionPlanner p, KubeConfig kc, Boolean onlyRun) {
 		super((kc != null && p == null) ? "KubeDispatcherRunOnce" : "KubeDispatcher");
@@ -63,44 +64,69 @@ public class KubeDispatcher extends Thread {
 		runOnce = (kc != null && p == null);
 	}
 	
-	/* (non-Javadoc)
+	/**
+	 * Checks for job steps, which are ready to run; depending on its creation parameter "runOnce" this is
+	 * a one-time process or it is running cyclically until it is terminated externally
+	 * 
 	 * @see java.lang.Thread#run()
 	 */
-	@Transactional
     public void run() {
-    	int wait = 100000;
-    	try {
-    		wait = Integer.parseInt(ProductionPlanner.config.getProductionPlannerDispatcherWaitTime());
-    	} catch (NumberFormatException e) {
-    		wait = 100000;
-    	}
+		if (logger.isTraceEnabled()) logger.trace(">>> run()");
+		
+    	int wait = ProductionPlanner.config.getProductionPlannerDispatcherWaitTime();
+
     	if (runOnce) {
+			logger.log(PlannerMessage.KUBEDISPATCHER_RUN_ONCE);
     		if (kubeConfig != null) {
-    			UtilService.getJobStepUtil().checkForJobStepsToRun(kubeConfig, null, onlyRun);
+				try {
+					kubeConfig.getProductionPlanner().acquireThreadSemaphore("run");
+					UtilService.getJobStepUtil().checkForJobStepsToRun(kubeConfig, 0, onlyRun, true);
+					kubeConfig.getProductionPlanner().releaseThreadSemaphore("run");		
+				} catch (Exception e) {
+					kubeConfig.getProductionPlanner().releaseThreadSemaphore("run");		
+					logger.log(GeneralMessage.RUNTIME_EXCEPTION_ENCOUNTERED, e.getMessage());
+				}
     		} else {
-    			Messages.KUBEDISPATCHER_CONFIG_NOT_SET.log(logger);
+    			logger.log(PlannerMessage.KUBEDISPATCHER_CONFIG_NOT_SET);
     		}
     	} else {
     		if (productionPlanner != null) {
     			if (wait <= 0) {
-					Messages.KUBEDISPATCHER_RUN_ONCE.log(logger);
-					productionPlanner.checkForJobStepsToRun();
+					logger.log(PlannerMessage.KUBEDISPATCHER_RUN_ONCE);
+					try {
+						productionPlanner.acquireThreadSemaphore("run");
+						UtilService.getJobStepUtil().checkForJobStepsToRun(kubeConfig, 0, onlyRun, true);
+						productionPlanner.releaseThreadSemaphore("run");		
+					} catch (Exception e) {
+						productionPlanner.releaseThreadSemaphore("run");		
+						logger.log(GeneralMessage.RUNTIME_EXCEPTION_ENCOUNTERED, e.getMessage());
+					}
     			} else {
     				while (!this.isInterrupted()) {
     					// look for job steps to run
-    					Messages.KUBEDISPATCHER_CYCLE.log(logger);
-    					productionPlanner.checkForJobStepsToRun();
+    					logger.log(PlannerMessage.KUBEDISPATCHER_CYCLE);
+    					if (productionPlanner.getReleaseThreads().size() == 0) {
+    						try {
+    							productionPlanner.acquireThreadSemaphore("run");
+    							UtilService.getJobStepUtil().checkForJobStepsToRun(kubeConfig, 0, onlyRun, true);
+    							productionPlanner.releaseThreadSemaphore("run");		
+    						} catch (Exception e) {
+    							productionPlanner.releaseThreadSemaphore("run");		
+    							logger.log(GeneralMessage.RUNTIME_EXCEPTION_ENCOUNTERED, e.getMessage());
+    						}
+    					}
     					try {
+        					logger.log(PlannerMessage.KUBEDISPATCHER_SLEEP, wait);
     						sleep(wait);
     					}
     					catch(InterruptedException e) {
-    						Messages.KUBEDISPATCHER_INTERRUPT.log(logger);
+    						logger.log(PlannerMessage.KUBEDISPATCHER_INTERRUPT);
     						this.interrupt();
     					}
     				}
     			}
     		} else {
-    			Messages.KUBEDISPATCHER_PLANNER_NOT_SET.log(logger);
+    			logger.log(PlannerMessage.KUBEDISPATCHER_PLANNER_NOT_SET);
     		}
     	}
     }   

@@ -8,13 +8,11 @@ package de.dlr.proseo.procmgr.rest.model;
 import java.util.ArrayList;
 import java.util.Map.Entry;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import de.dlr.proseo.model.ConfiguredProcessor;
 import de.dlr.proseo.model.Parameter;
-import de.dlr.proseo.model.Parameter.ParameterType;
+import de.dlr.proseo.model.enums.ParameterType;
 import de.dlr.proseo.model.enums.ProductQuality;
+import de.dlr.proseo.logging.logger.ProseoLogger;
 import de.dlr.proseo.model.Configuration;
 import de.dlr.proseo.model.ConfigurationFile;
 import de.dlr.proseo.model.ConfigurationInputFile;
@@ -27,7 +25,7 @@ import de.dlr.proseo.model.ConfigurationInputFile;
 public class ConfigurationUtil {
 
 	/** A logger for this class */
-	private static Logger logger = LoggerFactory.getLogger(ConfigurationUtil.class);
+	private static ProseoLogger logger = new ProseoLogger(ConfigurationUtil.class);
 	
 	/**
 	 * Convert a prosEO model configuration into a REST configuration
@@ -48,6 +46,9 @@ public class ConfigurationUtil {
 		restConfiguration.setMissionCode(modelConfiguration.getProcessorClass().getMission().getCode());
 		restConfiguration.setProcessorName(modelConfiguration.getProcessorClass().getProcessorName());
 		restConfiguration.setConfigurationVersion(modelConfiguration.getConfigurationVersion());
+		if (null != modelConfiguration.getMode()) {
+			restConfiguration.setMode(modelConfiguration.getMode());
+		}
 		if (null != modelConfiguration.getProductQuality()) {
 			restConfiguration.setProductQuality(modelConfiguration.getProductQuality().toString());
 		}
@@ -107,6 +108,9 @@ public class ConfigurationUtil {
 			} 
 		}
 		modelConfiguration.setConfigurationVersion(restConfiguration.getConfigurationVersion());
+		if (null != restConfiguration.getMode()) {
+			modelConfiguration.setMode(restConfiguration.getMode());
+		}
 		if (null != restConfiguration.getProductQuality()) {
 			modelConfiguration.setProductQuality(ProductQuality.valueOf(restConfiguration.getProductQuality()));
 		}

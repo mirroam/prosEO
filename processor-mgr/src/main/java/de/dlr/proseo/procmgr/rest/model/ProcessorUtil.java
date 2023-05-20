@@ -7,12 +7,11 @@ package de.dlr.proseo.procmgr.rest.model;
 
 import java.util.Map.Entry;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
+import de.dlr.proseo.logging.logger.ProseoLogger;
 import de.dlr.proseo.model.ConfiguredProcessor;
 import de.dlr.proseo.model.Processor;
 import de.dlr.proseo.model.Task;
+import de.dlr.proseo.model.enums.JobOrderVersion;
 
 /**
  * Utility methods for processors, e. g. for conversion between prosEO model and REST model
@@ -22,7 +21,7 @@ import de.dlr.proseo.model.Task;
 public class ProcessorUtil {
 
 	/** A logger for this class */
-	private static Logger logger = LoggerFactory.getLogger(ProcessorUtil.class);
+	private static ProseoLogger logger = new ProseoLogger(ProcessorUtil.class);
 	
 	/**
 	 * Convert a prosEO model processor into a REST processor
@@ -43,6 +42,8 @@ public class ProcessorUtil {
 		restProcessor.setMissionCode(modelProcessor.getProcessorClass().getMission().getCode());
 		restProcessor.setProcessorName(modelProcessor.getProcessorClass().getProcessorName());
 		restProcessor.setProcessorVersion(modelProcessor.getProcessorVersion());
+		restProcessor.setJobOrderVersion(modelProcessor.getJobOrderVersion().toString());
+		restProcessor.setUseInputFileTimeIntervals(modelProcessor.getUseInputFileTimeIntervals());
 		restProcessor.setIsTest(modelProcessor.getIsTest());
 		restProcessor.setMinDiskSpace(Long.valueOf(modelProcessor.getMinDiskSpace()));
 		restProcessor.setMaxTime(Long.valueOf(modelProcessor.getMaxTime()));
@@ -87,6 +88,12 @@ public class ProcessorUtil {
 			} 
 		}
 		modelProcessor.setProcessorVersion(restProcessor.getProcessorVersion());
+		if (null != restProcessor.getJobOrderVersion()) {
+			modelProcessor.setJobOrderVersion(JobOrderVersion.valueOf(restProcessor.getJobOrderVersion()));
+		}
+		if (null != restProcessor.getUseInputFileTimeIntervals()) {
+			modelProcessor.setUseInputFileTimeIntervals(restProcessor.getUseInputFileTimeIntervals());
+		}
 		modelProcessor.setIsTest(restProcessor.getIsTest());
 		modelProcessor.setMinDiskSpace(restProcessor.getMinDiskSpace().intValue());
 		modelProcessor.setMaxTime(restProcessor.getMaxTime().intValue());

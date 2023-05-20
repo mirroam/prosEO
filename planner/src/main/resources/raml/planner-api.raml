@@ -92,6 +92,7 @@ resourceTypes:
         displayName: planOrder
         queryParameters:
           facility: string
+          wait?: boolean
         responses:
           200:
             body:
@@ -103,6 +104,21 @@ resourceTypes:
       patch:
         description: Release processing order of id 
         displayName: releaseOrder
+        queryParameters:
+          wait?: boolean
+        responses:
+          200:
+            body:
+              application/json:
+                type: RestOrder
+                example: !include ../../../../../model/src/main/resources/raml/examples/order.json
+  /resume:
+    /{id}:
+      patch:
+        description: Resume processing order of id 
+        displayName: resumeOrder
+        queryParameters:
+          wait?: boolean
         responses:
           200:
             body:
@@ -178,12 +194,34 @@ resourceTypes:
         type: integer
         format: long
         description: The persistent id of the processing order
+      recordFrom?: integer
+      recordTo?: integer
+      logs?: boolean
+      orderBy?:
+        type: string[]
+        description: an array of strings containing a column name and an optional sort direction (ASC/DESC), separated by white space
     responses:
       200:
         body:
           application/json:
             type: RestJob[]
-            example: !include ../../../../../model/src/main/resources/raml/examples/job-list.json
+            example: !include ../../../../../model/src/main/resources/raml/examples/job-list.json  
+  /count:
+    type: standard
+    get:
+      description: Get number of jobs, possibly filtered by state and processing order 
+      displayName: countJobs
+      queryParameters:
+        state?: string
+        orderid?: 
+          type: integer
+          format: long
+          description: The persistent id of the processing order
+      responses:
+        200:
+          body:
+            text/plain:
+
   /{name}:
     get:
       description: Get production planner job
@@ -252,7 +290,6 @@ resourceTypes:
               application/json:
                 type: RestJobGraph
                 example: !include ../../../../../interfaces/src/main/resources/raml/examples/jobgraph.json
-
 /jobsteps:
   type: standard
   get:
@@ -280,6 +317,15 @@ resourceTypes:
             application/json:
               type: RestJobStep
               example: !include ../../../../../model/src/main/resources/raml/examples/jobstep.json
+  /log:
+    /{name}:
+      get:
+        description: Get the jobstep log text
+        displayName: getJobStepLog
+        responses:
+          200:
+            body:
+              text/plain:
   /resume:
     /{id}:
       patch:
@@ -373,7 +419,28 @@ resourceTypes:
   /{productid}:
     get:
       description: Product created and available, sent by prosEO Ingestor
+      displayName: getObjectByProductidAndFacilityId
+      queryParameters:
+        facility: integer
       responses:
         200:
-        
+          body:
+            text/plain:
+/semaphore:
+  /acquire:
+    get:
+      description: Acquire thread semaphore (sent by ingestor)
+      displayName: acquireSemaphore
+      responses:
+        200:
+          body:
+            text/plain:
+  /release:
+    get:
+      description: Release thread semaphore (sent by ingestor)
+      displayName: releaseSemaphore
+      responses:
+        200:
+          body:
+            text/plain:
                 

@@ -28,6 +28,10 @@ description: |
   All date-time values must conform to the ISO date-time format ("YYYY-MM-DD[THH:MM:SS.ssssssZ]"), with or without a second,
   a fraction of second and/or a time zone, e. g. the following are valid:
   "2020-04-08", "2020-04-08T11:30+0200", "2020-04-08T11:30:45.123456Z".
+  Value parts not specified will be set to zero, i. e. "2020-04-08" will be interpreted as "2020-04-08T00:00:00.000000" in UTC.
+  Therefore when specifying a time interval using "from"/"to" parameters, be sure to specify the end of the interval correctly,
+  e. g. to cover the whole day 2020-04-08 (in UTC), "2020-04-08" may be specified for the "from" parameter, but the "to" parameter
+  must read "2020-04-08T23:59:59.999999" or "2020-04-09".
   
   For all commands except "mission show" a user login is required, all commands except "mission show", "mission create",
   "user create" and all facility-related commands require login to a specific mission.
@@ -48,14 +52,12 @@ options:
       type: boolean
       description: Show the prosEO CLI version and exit (only for call from shell command line)
       shortForm: V
-    - name: user
+    - name: identFile
       type: string
-      description: The user name for login to prosEO.
-      shortForm: u
-    - name: password
-      type: string
-      description: The password for login to prosEO (only valid if a user name for login is given).
-      shortForm: p
+      description: |
+          Path to a file containing user name (without mission prefix) and password (in two separate lines);
+          the file will only be read, if it is only readable by the current system user (as far as warranted by the operating system)
+      shortForm: i
     - name: mission
       type: string
       description: The mission to login to (only valid if a user name for login is given)
@@ -78,14 +80,12 @@ commands:
     - name: login
       description: Log in to a mission in prosEO. All valid commands except for "mission show" require prior login.
       options:
-        - name: user
+        - name: identFile
           type: string
-          description: User name
-          shortForm: u
-        - name: password
-          type: string
-          description: The user's password
-          shortForm: p
+          description: |
+              Path to a file containing user name (without mission prefix) and password (in two separate lines);
+              the file will only be read, if it is only readable by the current system user (as far as warranted by the operating system)
+          shortForm: i
       parameters:
         - name: missionCode
           type: string
@@ -104,6 +104,10 @@ commands:
             - name: format
               type: string
               description: The output format (one of { JSON, XML, YAML }; default value YAML [human readable])
+            - name: verbose
+              type: boolean
+              description: If set, give mission details, otherwise show only mission code and name
+              shortForm: v
           parameters:
             - name: missionCode
               type: string
@@ -140,6 +144,9 @@ commands:
             - name: format
               type: string
               description: The file format (one of { JSON, XML, YAML }; default value JSON)
+            - name: delete-attributes
+              type: boolean
+              description: Delete non-mandatory attributes not given in the mission definition file and/or the command parameters
           parameters:
             - name: attribute
               type: string
@@ -196,23 +203,27 @@ commands:
       description: Commands for managing orbits for a given spacecraft
       subcommands:
         - name: show
-          description: Lists orbits, optionally restricted to a given orbit range
+          description: Lists orbits, optionally restricted to a given orbit number range
           options:
             - name: from
               type: integer
-              description: Lower bound of orbit range
+              description: Lower bound of orbit number range
             - name: to
               type: integer
-              description: Upper bound of orbit range
+              description: Upper bound of orbit number range
             - name: format
               type: string
               description: The output format (one of { JSON, XML, YAML }; default value YAML [human readable])
+            - name: verbose
+              type: boolean
+              description: If set, give orbit details, otherwise show only spacecraft code, orbit number and start/stop times
+              shortForm: v
           parameters:
             - name: spacecraftCode
               type: string
               description: The code of the spacecraft the orbits belong to
         - name: create
-          description: Add a set of orbits for the given spacecraft
+          description: Add or update a set of orbits for the given spacecraft (existing orbits will be updated)
           options:
             - name: file
               type: string
@@ -281,13 +292,17 @@ commands:
           options:
             - name: from
               type: datetime
-              description: Lower bound of order start time
+              description: Lower bound of order start time (rounded down to next full second)
             - name: to
               type: datetime
-              description: Upper bound of order start time
+              description: Upper bound of order start time (rounded up to next full second)
             - name: format
               type: string
               description: The output format (one of { JSON, XML, YAML }; default value YAML [human readable])
+            - name: verbose
+              type: boolean
+              description: If set, give order details, otherwise show only order identifier, UUID, start/stop times, mode and state
+              shortForm: v
           parameters:
             - name: orderId
               type: string
@@ -548,6 +563,10 @@ commands:
                 - name: format
                   type: string
                   description: The output format (one of { JSON, XML, YAML }; default value YAML [human readable])
+                - name: verbose
+                  type: boolean
+                  description: If set, give processor class details , otherwise show only processor class name
+                  shortForm: v
               parameters:
                 - name: processorClass
                   type: string
@@ -607,6 +626,10 @@ commands:
             - name: format
               type: string
               description: The output format (one of { JSON, XML, YAML }; default value YAML [human readable])
+            - name: verbose
+              type: boolean
+              description: If set, give processor details, otherwise show only processor class name and processor version
+              shortForm: v
           parameters:
             - name: processorClass
               type: string
@@ -687,6 +710,11 @@ commands:
                 - name: format
                   type: string
                   description: The output format (one of { JSON, XML, YAML }; default value YAML [human readable])
+                - name: verbose
+                  type: boolean
+                  description: If set, give configured processor details, otherwise show only identifier, UUID and
+                               and key data for linked processor and configuration
+                  shortForm: v
               parameters:
                 - name: configuredProcessorIdentifier
                   type: string
@@ -761,6 +789,10 @@ commands:
             - name: format
               type: string
               description: The output format (one of { JSON, XML, YAML }; default value YAML [human readable])
+            - name: verbose
+              type: boolean
+              description: If set, give configuration details, otherwise show only processor class name and configuration version
+              shortForm: v
           parameters:
             - name: processorClass
               type: string
@@ -843,6 +875,10 @@ commands:
             - name: format
               type: string
               description: The output format (one of { JSON, XML, YAML }; default value YAML [human readable])
+            - name: verbose
+              type: boolean
+              description: If set, give product class details, otherwise show only product class name
+              shortForm: v
           parameters:
             - name: productClass
               type: string
@@ -908,6 +944,10 @@ commands:
                 - name: format
                   type: string
                   description: The output format (one of { PLAIN, JSON, XML, YAML }; default value PLAIN [rule language]).
+                - name: verbose
+                  type: boolean
+                  description: If set, give rule details including job steps, otherwise show rule as in PLAIN format
+                  shortForm: v
               parameters:
                 - name: targetProductClass
                   type: string
@@ -919,7 +959,7 @@ commands:
             - name: create
               description: Create a new selection rule for the given target product class; 
                            the user will be prompted for mandatory attributes not given on the command line.
-                           If PLAIN format is specified and no file name is given,
+                           If no file name is given,
                            the user will be prompted to enter the selection rule in Rule Language.
               options:
                 - name: file
@@ -928,7 +968,8 @@ commands:
                   shortForm: f
                 - name: format
                   type: string
-                  description: The file format (one of { PLAIN, JSON, XML, YAML }; default value JSON)
+                  description: The file format (one of { PLAIN, JSON, XML, YAML }; default value JSON,
+                               or PLAIN if no input file is given)
               parameters:
                 - name: targetProductClass
                   type: string
@@ -942,7 +983,7 @@ commands:
             - name: update
               description: Update a selection rule for the given target class and configured processor; 
                            the user will be prompted for mandatory attributes not given on the command line.
-                           If PLAIN format is specified and no file name is given,
+                           If no file name is given,
                            the user will be prompted to enter the selection rule in Rule Language.
                            If multiple rules exist for the target product class,
                            the user will be prompted to select the rule to apply the update to.
@@ -953,7 +994,8 @@ commands:
                   shortForm: f
                 - name: format
                   type: string
-                  description: The file format (one of { PLAIN, JSON, XML, YAML }; default value JSON)
+                  description: The file format (one of { PLAIN, JSON, XML, YAML }; default value JSON,
+                               or PLAIN if no input file is given)
                 - name: delete-attributes
                   type: boolean
                   description: Delete non-mandatory attributes not given in the selection rule definition file and/or the command parameters
@@ -986,10 +1028,10 @@ commands:
           options:
             - name: from
               type: datetime
-              description: Lower bound of sensing start time
+              description: Lower bound of sensing start time (rounded down to next full second)
             - name: to
               type: datetime
-              description: Upper bound of sensing start time
+              description: Upper bound of sensing start time (rounded up to next full second)
             - name: format
               type: string
               description: The output format (one of { JSON, XML, YAML }; default value YAML [human readable])
@@ -1102,6 +1144,11 @@ commands:
 #                  description: The processing facility, at which the product file is stored
             - name: delete
               description: Delete a product file for a given product and processing facility
+              options:
+                - name: noErase
+                  type: boolean
+                  description: Do not erase the data file(s) from the storage area, e. g. if they are read-only (default "false")
+                  shortForm: n
               parameters:
                 - name: productId
                   type: integer
@@ -1119,6 +1166,10 @@ commands:
         - name: format
           type: string
           description: The file format (one of { JSON, XML, YAML }; default value JSON)
+        - name: noCopy
+          type: boolean
+          description: If set, files will not be copied to a new location, if source and target storage types are equal
+          shortForm: n
       parameters:
         - name: processingFacility
           type: string
@@ -1160,6 +1211,12 @@ commands:
               description: The mission to create the user for (only valid if not yet logged in into a mission;
                            basically intended for creating a single user with "ROLE_USERMGR" for a new mission)
               shortForm: m
+            - name: identFile
+              type: string
+              description: |
+                  Path to a file containing user name (without mission prefix) and password (in two separate lines);
+                  the file will only be read, if it is only readable by the current system user (as far as warranted by the operating system)
+              shortForm: i
           parameters:
             - name: userName
               type: string
@@ -1250,6 +1307,15 @@ commands:
               optional: false
               repeatable: true
               description: An authority to revoke (multiple authorities allowed)
+    - name: password
+      description: |
+          Interactively change the password of the logged in user, or of the named user,
+          if executed by a user with user manager permissions
+      parameters:
+        - name: userName
+          type: string
+          optional: true
+          description: The name of the user account to change the password for (default is the logged in user)
     - name: group
       description: Commands for managing groups (note that group names are stored with a mission prefix in the user database,
                    but the mission prefix is not used in the command-line interface)
@@ -1402,6 +1468,10 @@ commands:
               description: If set, give facility details, otherwise show facility names only (setting facilityName parameter
                            implies verbose)
               shortForm: v
+            - name: showPasswords
+              type: boolean
+              description: If set, show passwords for Processing Facility users, otherwise show placeholder
+              shortForm: s
           parameters:
             - name: facilityName
               type: string

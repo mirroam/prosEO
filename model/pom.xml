@@ -6,7 +6,7 @@
 	<parent>
 		<groupId>de.dlr.proseo</groupId>
 		<artifactId>proseo</artifactId>
-		<version>0.6.0</version>
+		<version>0.9.4</version>
 	</parent>
 
 	<artifactId>proseo-model</artifactId>
@@ -93,10 +93,14 @@
 		    <artifactId>proseo-common</artifactId>
 		    <version>${project.version}</version>
 		</dependency>
+		<dependency>
+		    <groupId>de.dlr.proseo</groupId>
+		    <artifactId>proseo-logging</artifactId>
+		    <version>${project.version}</version>
+		</dependency>
         <dependency>
             <groupId>com.phoenixnap.oss</groupId>
             <artifactId>springmvc-raml-plugin</artifactId>
-            <version>${raml-plugin-version}</version>
             <type>maven-plugin</type>
         </dependency>
         <!-- Implicit dependencies for classes generated from RAML spec -->

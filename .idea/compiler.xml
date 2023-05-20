@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="CompilerConfiguration">
+    <annotationProcessing>
+      <profile name="Maven default annotation processors profile" enabled="true">
+        <sourceOutputDir name="target/generated-sources/annotations" />
+        <sourceTestOutputDir name="target/generated-test-sources/test-annotations" />
+        <outputRelativeToContentRoot value="true" />
+        <module name="proseo-processor-mgr" />
+        <module name="proseo-model" />
+        <module name="proseo-ui-backend" />
+        <module name="proseo-storage-mgr" />
+        <module name="proseo-common" />
+        <module name="proseo-ui-gui" />
+        <module name="proseo-ingestor" />
+        <module name="proseo-productclass-mgr" />
+        <module name="proseo-sample-wrapper" />
+        <module name="proseo-order-mgr" />
+        <module name="proseo-ui-cli" />
+        <module name="proseo-facility-mgr" />
+        <module name="proseo-base-wrapper" />
+        <module name="proseo-user-mgr" />
+        <module name="proseo-sample-processor" />
+        <module name="proseo-api-prip" />
+        <module name="proseo-interfaces" />
+        <module name="proseo-planner" />
+      </profile>
+    </annotationProcessing>
+    <bytecodeTargetLevel>
+      <module name="proseo" target="11" />
+      <module name="proseo-api" target="11" />
+      <module name="proseo-api-prip" target="11" />
+      <module name="proseo-base-wrapper" target="11" />
+      <module name="proseo-common" target="11" />
+      <module name="proseo-facility-mgr" target="11" />
+      <module name="proseo-ingestor" target="11" />
+      <module name="proseo-interfaces" target="11" />
+      <module name="proseo-model" target="11" />
+      <module name="proseo-order-mgr" target="11" />
+      <module name="proseo-planner" target="11" />
+      <module name="proseo-processor-mgr" target="11" />
+      <module name="proseo-productclass-mgr" target="11" />
+      <module name="proseo-sample-processor" target="11" />
+      <module name="proseo-sample-wrapper" target="11" />
+      <module name="proseo-samples" target="11" />
+      <module name="proseo-storage-mgr" target="11" />
+      <module name="proseo-ui" target="11" />
+      <module name="proseo-ui-backend" target="11" />
+      <module name="proseo-ui-cli" target="11" />
+      <module name="proseo-ui-gui" target="11" />
+      <module name="proseo-user-mgr" target="11" />
+      <module name="sample-processor" target="11" />
+      <module name="sample-wrapper" target="11" />
+    </bytecodeTargetLevel>
+  </component>
+  <component name="JavacSettings">
+    <option name="ADDITIONAL_OPTIONS_OVERRIDE">
+      <module name="proseo-api-prip" options="-parameters" />
+      <module name="proseo-base-wrapper" options="-parameters" />
+      <module name="proseo-common" options="-parameters" />
+      <module name="proseo-facility-mgr" options="-parameters" />
+      <module name="proseo-ingestor" options="-parameters" />
+      <module name="proseo-interfaces" options="-parameters" />
+      <module name="proseo-model" options="-parameters" />
+      <module name="proseo-order-mgr" options="-parameters" />
+      <module name="proseo-planner" options="-parameters" />
+      <module name="proseo-processor-mgr" options="-parameters" />
+      <module name="proseo-productclass-mgr" options="-parameters" />
+      <module name="proseo-sample-processor" options="-parameters" />
+      <module name="proseo-sample-wrapper" options="-parameters" />
+      <module name="proseo-storage-mgr" options="-parameters" />
+      <module name="proseo-ui-backend" options="-parameters" />
+      <module name="proseo-ui-cli" options="-parameters" />
+      <module name="proseo-ui-gui" options="-parameters" />
+      <module name="proseo-user-mgr" options="-parameters" />
+      <module name="sample-processor" options="-parameters" />
+      <module name="sample-wrapper" options="-parameters" />
+    </option>
+  </component>
+</project>

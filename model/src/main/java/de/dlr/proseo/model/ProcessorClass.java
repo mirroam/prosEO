@@ -11,6 +11,7 @@ import java.util.Set;
 
 import javax.persistence.Column;
 import javax.persistence.Entity;
+import javax.persistence.FetchType;
 import javax.persistence.Index;
 import javax.persistence.ManyToOne;
 import javax.persistence.OneToMany;
@@ -125,14 +126,18 @@ public class ProcessorClass extends PersistentObject {
 
 	@Override
 	public boolean equals(Object obj) {
+		// Object identity
 		if (this == obj)
 			return true;
-		if (!super.equals(obj))
-			return false;
+		
+		// Same database object
+		if (super.equals(obj))
+			return true;
+		
 		if (!(obj instanceof ProcessorClass))
 			return false;
 		ProcessorClass other = (ProcessorClass) obj;
-		return Objects.equals(mission, other.mission) && Objects.equals(processorName, other.processorName);
+		return Objects.equals(processorName, other.getProcessorName()) && Objects.equals(mission, other.getMission());
 	}
 
 	@Override

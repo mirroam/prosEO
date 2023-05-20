@@ -5,16 +5,16 @@
  */
 package de.dlr.proseo.api.prip.odata;
 
+import static de.dlr.proseo.api.prip.odata.CscAttributeName.*;
+
 import java.net.URI;
 import java.net.URISyntaxException;
-import java.sql.Date;
 import java.time.Instant;
+import java.util.Date;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
-
+import java.util.Map.Entry;
 import org.apache.olingo.commons.api.Constants;
 import org.apache.olingo.commons.api.data.ComplexValue;
 import org.apache.olingo.commons.api.data.Entity;
@@ -22,20 +22,23 @@ import org.apache.olingo.commons.api.data.EntityCollection;
 import org.apache.olingo.commons.api.data.Link;
 import org.apache.olingo.commons.api.data.Property;
 import org.apache.olingo.commons.api.data.ValueType;
+import org.apache.olingo.commons.api.edm.FullQualifiedName;
+import org.apache.olingo.commons.api.edm.geo.Geospatial;
+import org.apache.olingo.commons.api.edm.geo.LineString;
+import org.apache.olingo.commons.api.edm.geo.Point;
+import org.apache.olingo.commons.api.edm.geo.Polygon;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.MediaType;
 
-import de.dlr.proseo.interfaces.rest.model.RestParameter;
-import de.dlr.proseo.interfaces.rest.model.RestProduct;
-import de.dlr.proseo.interfaces.rest.model.RestProductFile;
+import de.dlr.proseo.model.Mission;
+import de.dlr.proseo.model.Parameter;
+import de.dlr.proseo.model.Product;
+import de.dlr.proseo.model.ProductFile;
 import de.dlr.proseo.model.enums.ProductionType;
-import de.dlr.proseo.model.util.OrbitTimeFormatter;
 
 /**
- * Utility class to convert product objects from prosEO REST API to PRIP (OData) REST API
- * 
- * Attributes are mission-specific for Sentinel-5P
- * TODO Find mission-independent way of transferring attributes
+ * Utility class to convert product objects from prosEO database model to PRIP (OData) REST API
  * 
  * @author Dr. Thomas Bassler
  *
@@ -43,59 +46,65 @@ import de.dlr.proseo.model.util.OrbitTimeFormatter;
 public class ProductUtil {
 
 	private static final String ERR_NO_PRODUCT_FILES_FOUND = "No product files found in product ";
+	private static final Date START_OF_MISSION = Date.from(Instant.parse("1970-01-01T00:00:00.000Z"));
+	private static final Date END_OF_MISSION = Date.from(Instant.parse("9999-12-31T23:59:59.999Z"));
 
 	/** A logger for this class */
 	private static Logger logger = LoggerFactory.getLogger(ProductUtil.class);
 	
 	/**
-	 * Create a PRIP interface product from a prosEO interface product
+	 * Create a PRIP interface product from a prosEO interface product; when setting PRIP product attributes the product
+	 * metadata attributes are overridden by product parameters, if a product parameter with the intended attribute name exists
 	 * 
-	 * @param restProduct the prosEO interface product to convert
+	 * @param modelProduct the prosEO model product to convert
 	 * @return an OData entity object representing the prosEO interface product
 	 * @throws IllegalArgumentException if any mandatory information is missing from the prosEO interface product 
 	 * @throws URISyntaxException if a valid URI cannot be generated from any product UUID
 	 */
-	public static Entity toPripProduct(RestProduct restProduct) throws IllegalArgumentException, URISyntaxException {
-		if (logger.isTraceEnabled()) logger.trace(">>> toPripProduct({})", restProduct.getId());
+	public static Entity toPripProduct(Product modelProduct) throws IllegalArgumentException, URISyntaxException {
+		if (logger.isTraceEnabled()) logger.trace(">>> toPripProduct({})", modelProduct.getId());
 		
-		// Select a product file
-		if (restProduct.getProductFile().isEmpty()) {
-			throw new IllegalArgumentException(ERR_NO_PRODUCT_FILES_FOUND + restProduct.getId());
+		// Select a product file (we just take the first one, since they are assumed to be identical, even if stored on
+		// different processing facilities)
+		if (modelProduct.getProductFile().isEmpty()) {
+			throw new IllegalArgumentException(ERR_NO_PRODUCT_FILES_FOUND + modelProduct.getId());
 		}
-		RestProductFile restProductFile = restProduct.getProductFile().get(0);
+		ProductFile modelProductFile = modelProduct.getProductFile().iterator().next();
+		Mission modelMission = modelProduct.getProductClass().getMission();
 		
 		// Determine production type
-		String restProductionType = restProduct.getProductionType();
-		int productionType;
-		if (ProductionType.SYSTEMATIC.name().equals(restProductionType)) {
-			productionType = ProductEdmProvider.EN_PRODUCTIONTYPE_SYSTEMATIC_VAL;
-		} else if (ProductionType.ON_DEMAND_DEFAULT.name().equals(restProductionType)) {
+		ProductionType modelProductionType = modelProduct.getProductionType();
+		int productionType = ProductEdmProvider.EN_PRODUCTIONTYPE_SYSTEMATIC_VAL; // Default, also in case of no production type
+		if (ProductionType.ON_DEMAND_DEFAULT.equals(modelProductionType)) {
 			productionType = ProductEdmProvider.EN_PRODUCTIONTYPE_ONDEMDEF_VAL;
-		} else {
+		} else if (ProductionType.ON_DEMAND_NON_DEFAULT.equals(modelProductionType)) {
 			productionType = ProductEdmProvider.EN_PRODUCTIONTYPE_ONDEMNODEF_VAL;
 		}
 		
 		// Create product entity
 		Entity product = new Entity();
 		product.setType(ProductEdmProvider.ET_PRODUCT_FQN.getFullQualifiedNameAsString());
-		product.addProperty(new Property(null, ProductEdmProvider.GENERIC_PROP_ID, ValueType.PRIMITIVE, UUID.fromString(restProduct.getUuid())))
+		product.addProperty(new Property(null, ProductEdmProvider.GENERIC_PROP_ID, ValueType.PRIMITIVE, modelProduct.getUuid()))
 			.addProperty(new Property(null, ProductEdmProvider.GENERIC_PROP_NAME, ValueType.PRIMITIVE, 
-				(null == restProductFile.getZipFileName() ? restProductFile.getProductFileName() : restProductFile.getZipFileName())))
+				(null == modelProductFile.getZipFileName() ? modelProductFile.getProductFileName() : modelProductFile.getZipFileName())))
 			.addProperty(new Property(null, ProductEdmProvider.GENERIC_PROP_CONTENT_TYPE, ValueType.PRIMITIVE,
-				"application/octet-stream"))
+				MediaType.APPLICATION_OCTET_STREAM.toString()))
 			.addProperty(new Property(null, ProductEdmProvider.GENERIC_PROP_CONTENT_LENGTH, ValueType.PRIMITIVE,
-				(null == restProductFile.getZipFileName() ? restProductFile.getFileSize() : restProductFile.getZipFileSize())))
+				(null == modelProductFile.getZipFileName() ? modelProductFile.getFileSize() : modelProductFile.getZipFileSize())))
+			.addProperty(new Property(null, ProductEdmProvider.ET_PRODUCT_PROP_ORIGIN_DATE, ValueType.PRIMITIVE,
+				(null == modelProduct.getRawDataAvailabilityTime() ? START_OF_MISSION : Date.from(modelProduct.getRawDataAvailabilityTime()))))
 			.addProperty(new Property(null, ProductEdmProvider.ET_PRODUCT_PROP_PUBLICATION_DATE, ValueType.PRIMITIVE,
-				Date.from(Instant.from(OrbitTimeFormatter.parse(restProduct.getGenerationTime())))))
-//			.addProperty(new Property(null, ProductEdmProvider.ET_PRODUCT_PROP_EVICTION_DATE, ValueType.PRIMITIVE,
-//				Date.from(Instant.now().plusSeconds(50 * 365 * 24 * 60 * 60))))  // TODO Define eviction policy (currently 50 years)
+					(null == modelProduct.getPublicationTime() ? Date.from(modelProduct.getGenerationTime()) : 
+						Date.from(modelProduct.getPublicationTime()))))
+			.addProperty(new Property(null, ProductEdmProvider.ET_PRODUCT_PROP_EVICTION_DATE, ValueType.PRIMITIVE,
+				(null == modelProduct.getEvictionTime() ? END_OF_MISSION : Date.from(modelProduct.getEvictionTime()))))
 			.addProperty(new Property(null, ProductEdmProvider.ET_PRODUCT_PROP_PRODUCTION_TYPE, ValueType.ENUM, productionType));
 
 		ComplexValue contentDate = new ComplexValue();
 		contentDate.getValue().add(new Property(null, ProductEdmProvider.CT_TIMERANGE_PROP_START, ValueType.PRIMITIVE,
-				Date.from(Instant.from(OrbitTimeFormatter.parse(restProduct.getSensingStartTime())))));
+				Date.from(modelProduct.getSensingStartTime())));
 		contentDate.getValue().add(new Property(null, ProductEdmProvider.CT_TIMERANGE_PROP_END, ValueType.PRIMITIVE,
-				Date.from(Instant.from(OrbitTimeFormatter.parse(restProduct.getSensingStopTime())))));
+				Date.from(modelProduct.getSensingStopTime())));
 		product.addProperty(new Property(null, ProductEdmProvider.ET_PRODUCT_PROP_CONTENT_DATE, ValueType.COMPLEX, contentDate));
 		
 		// Fill checksum information from restProductFile
@@ -103,160 +112,235 @@ public class ProductUtil {
 		ComplexValue checksum = new ComplexValue();
 		checksum.getValue().add(new Property(null, ProductEdmProvider.CT_CHECKSUM_PROP_ALGORITHM, ValueType.PRIMITIVE, "MD5"));
 		checksum.getValue().add(new Property(null, ProductEdmProvider.CT_CHECKSUM_PROP_VALUE, ValueType.PRIMITIVE,
-			(null == restProductFile.getZipFileName() ? restProductFile.getChecksum() : restProductFile.getZipChecksum())));
+			(null == modelProductFile.getZipFileName() ? modelProductFile.getChecksum() : modelProductFile.getZipChecksum())));
 		checksum.getValue().add(new Property(null, ProductEdmProvider.CT_CHECKSUM_PROP_CHECKSUM_DATE, ValueType.PRIMITIVE,
-			(null == restProductFile.getZipFileName() ?
-				Date.from(Instant.from(OrbitTimeFormatter.parse(restProductFile.getChecksumTime()))) :
-				Date.from(Instant.from(OrbitTimeFormatter.parse(restProductFile.getZipChecksumTime()))))));
+			(null == modelProductFile.getZipFileName() ?
+				Date.from(modelProductFile.getChecksumTime()) :
+				Date.from(modelProductFile.getZipChecksumTime()))));
 		checksums.add(checksum);
-		product.addProperty(new Property(null, ProductEdmProvider.ET_PRODUCT_PROP_CHECKSUMS, ValueType.COLLECTION_COMPLEX, checksums));
+		product.addProperty(new Property(null, ProductEdmProvider.ET_PRODUCT_PROP_CHECKSUM, ValueType.COLLECTION_COMPLEX, checksums));
+		
+		// Set footprint information from "coordinates" parameter, if available
+		Parameter footprintParameter = modelProduct.getParameters().get("coordinates");
+		if (null != footprintParameter) {
+			createODataFootprint(product, footprintParameter);
+		}
 
-		// Create navigatable collection of attributes
+		// Create navigable collection of attributes
 		EntityCollection attributes = new EntityCollection();
-		attributes.setId(new URI("Product(" + restProduct.getUuid() + ")/Attributes"));
+		attributes.setId(new URI("Product(" + modelProduct.getUuid() + ")/Attributes"));
 		
-		Entity beginningDateTime = new Entity();
-		beginningDateTime.setType(ProductEdmProvider.ET_DATEATTRIBUTE_FQN.toString());
-		beginningDateTime
-				.addProperty(new Property(null, ProductEdmProvider.GENERIC_PROP_NAME, ValueType.PRIMITIVE, "beginningDateTime"))
-				.addProperty(new Property(null, ProductEdmProvider.ET_ATTRIBUTES_PROP_VALUETYPE, ValueType.PRIMITIVE,
-						ProductEdmProvider.ET_DATEATTRIBUTE_NAME))
-				.addProperty(new Property(null, ProductEdmProvider.GENERIC_PROP_VALUE, ValueType.PRIMITIVE,
-						Date.from(Instant.from(OrbitTimeFormatter.parse(restProduct.getSensingStartTime())))));
-		attributes.getEntities().add(beginningDateTime);
+		if (null == modelProduct.getParameters().get(BEGINNING_DATE_TIME.getValue())) {
+			Entity beginningDateTime = new Entity();
+			beginningDateTime.setType(ProductEdmProvider.ET_DATEATTRIBUTE_FQN.toString());
+			beginningDateTime
+					.addProperty(new Property(null, ProductEdmProvider.GENERIC_PROP_NAME, ValueType.PRIMITIVE,
+							BEGINNING_DATE_TIME.getValue()))
+					.addProperty(new Property(null, ProductEdmProvider.ET_ATTRIBUTE_PROP_VALUETYPE, ValueType.PRIMITIVE,
+							ProductEdmProvider.ET_DATEATTRIBUTE_VALUETYPE))
+					.addProperty(new Property(null, ProductEdmProvider.GENERIC_PROP_VALUE, ValueType.PRIMITIVE,
+							Date.from(modelProduct.getSensingStartTime())));
+			attributes.getEntities().add(beginningDateTime);
+		}
 		
-		Entity endingDateTime = new Entity();
-		endingDateTime.setType(ProductEdmProvider.ET_DATEATTRIBUTE_FQN.toString());
-		endingDateTime
-				.addProperty(new Property(null, ProductEdmProvider.GENERIC_PROP_NAME, ValueType.PRIMITIVE, "endingDateTime"))
-				.addProperty(new Property(null, ProductEdmProvider.ET_ATTRIBUTES_PROP_VALUETYPE, ValueType.PRIMITIVE,
-						ProductEdmProvider.ET_DATEATTRIBUTE_NAME))
-				.addProperty(new Property(null, ProductEdmProvider.GENERIC_PROP_VALUE, ValueType.PRIMITIVE,
-						Date.from(Instant.from(OrbitTimeFormatter.parse(restProduct.getSensingStopTime())))));
-		attributes.getEntities().add(endingDateTime);
+		if (null == modelProduct.getParameters().get(ENDING_DATE_TIME.getValue())) {
+			Entity endingDateTime = new Entity();
+			endingDateTime.setType(ProductEdmProvider.ET_DATEATTRIBUTE_FQN.toString());
+			endingDateTime
+					.addProperty(new Property(null, ProductEdmProvider.GENERIC_PROP_NAME, ValueType.PRIMITIVE,
+							ENDING_DATE_TIME.getValue()))
+					.addProperty(new Property(null, ProductEdmProvider.ET_ATTRIBUTE_PROP_VALUETYPE, ValueType.PRIMITIVE,
+							ProductEdmProvider.ET_DATEATTRIBUTE_VALUETYPE))
+					.addProperty(new Property(null, ProductEdmProvider.GENERIC_PROP_VALUE, ValueType.PRIMITIVE,
+							Date.from(modelProduct.getSensingStopTime())));
+			attributes.getEntities().add(endingDateTime);
+		}
 		
-		Entity platformShortName = new Entity();
-		platformShortName.setType(ProductEdmProvider.ET_STRINGATTRIBUTE_FQN.toString());
-		platformShortName
-				.addProperty(new Property(null, ProductEdmProvider.GENERIC_PROP_NAME, ValueType.PRIMITIVE, "platformShortName"))
-				.addProperty(new Property(null, ProductEdmProvider.ET_ATTRIBUTES_PROP_VALUETYPE, ValueType.PRIMITIVE,
-						ProductEdmProvider.ET_STRINGATTRIBUTE_NAME))
-				.addProperty(new Property(null, ProductEdmProvider.GENERIC_PROP_VALUE, ValueType.PRIMITIVE,
-						restProduct.getMissionCode()));
-		attributes.getEntities().add(platformShortName);
+		if (null == modelProduct.getParameters().get(PROCESSING_DATE.getValue())) {
+			Entity processingDateTime = new Entity();
+			processingDateTime.setType(ProductEdmProvider.ET_DATEATTRIBUTE_FQN.toString());
+			processingDateTime
+					.addProperty(new Property(null, ProductEdmProvider.GENERIC_PROP_NAME, ValueType.PRIMITIVE,
+							PROCESSING_DATE.getValue()))
+					.addProperty(new Property(null, ProductEdmProvider.ET_ATTRIBUTE_PROP_VALUETYPE, ValueType.PRIMITIVE,
+							ProductEdmProvider.ET_DATEATTRIBUTE_VALUETYPE))
+					.addProperty(new Property(null, ProductEdmProvider.GENERIC_PROP_VALUE, ValueType.PRIMITIVE,
+							Date.from(modelProduct.getGenerationTime())));
+			attributes.getEntities().add(processingDateTime);
+		}
 		
-		// TODO Add instrument short name to Mission?
-		Entity instrumentShortName = new Entity();
-		instrumentShortName.setType(ProductEdmProvider.ET_STRINGATTRIBUTE_FQN.toString());
-		instrumentShortName
-				.addProperty(new Property(null, ProductEdmProvider.GENERIC_PROP_NAME, ValueType.PRIMITIVE, "instrumentShortName"))
-				.addProperty(new Property(null, ProductEdmProvider.ET_ATTRIBUTES_PROP_VALUETYPE, ValueType.PRIMITIVE,
-						ProductEdmProvider.ET_STRINGATTRIBUTE_NAME))
-				.addProperty(new Property(null, ProductEdmProvider.GENERIC_PROP_VALUE, ValueType.PRIMITIVE, ""));
-		attributes.getEntities().add(instrumentShortName);
+		if (null == modelProduct.getParameters().get(PLATFORM_SHORT_NAME.getValue())) {
+			Entity platformShortName = new Entity();
+			platformShortName.setType(ProductEdmProvider.ET_STRINGATTRIBUTE_FQN.toString());
+			platformShortName
+					.addProperty(new Property(null, ProductEdmProvider.GENERIC_PROP_NAME, ValueType.PRIMITIVE,
+							PLATFORM_SHORT_NAME.getValue()))
+					.addProperty(new Property(null, ProductEdmProvider.ET_ATTRIBUTE_PROP_VALUETYPE, ValueType.PRIMITIVE,
+							ProductEdmProvider.ET_STRINGATTRIBUTE_VALUETYPE))
+					.addProperty(
+							new Property(null, ProductEdmProvider.GENERIC_PROP_VALUE, ValueType.PRIMITIVE, modelMission.getName()));
+			attributes.getEntities().add(platformShortName);
+		}
 		
-		Entity orbitNumber = new Entity();
-		orbitNumber.setType(ProductEdmProvider.ET_INTEGERATTRIBUTE_FQN.toString());
-		orbitNumber
-				.addProperty(new Property(null, ProductEdmProvider.GENERIC_PROP_NAME, ValueType.PRIMITIVE, "orbitNumber"))
-				.addProperty(new Property(null, ProductEdmProvider.ET_ATTRIBUTES_PROP_VALUETYPE, ValueType.PRIMITIVE,
-						ProductEdmProvider.ET_INTEGERATTRIBUTE_NAME))
-				.addProperty(new Property(null, ProductEdmProvider.GENERIC_PROP_VALUE, ValueType.PRIMITIVE,
-						null == restProduct.getOrbit() ? 0 : restProduct.getOrbit().getOrbitNumber()));
-		attributes.getEntities().add(orbitNumber);
+		if (null != modelProduct.getConfiguredProcessor()) {
+			// Product was generated by this prosEO instance, so we can reasonably set the processing centre and the instrument short name
+			
+			if (null == modelProduct.getParameters().get(PROCESSING_CENTER.getValue())) {
+				Entity processingCentre = new Entity();
+				processingCentre.setType(ProductEdmProvider.ET_STRINGATTRIBUTE_FQN.toString());
+				processingCentre
+						.addProperty(new Property(null, ProductEdmProvider.GENERIC_PROP_NAME, ValueType.PRIMITIVE,
+								PROCESSING_CENTER.getValue()))
+						.addProperty(new Property(null, ProductEdmProvider.ET_ATTRIBUTE_PROP_VALUETYPE, ValueType.PRIMITIVE,
+								ProductEdmProvider.ET_STRINGATTRIBUTE_VALUETYPE))
+						.addProperty(new Property(null, ProductEdmProvider.GENERIC_PROP_VALUE, ValueType.PRIMITIVE,
+								(null == modelMission.getProcessingCentre() ? "" : modelMission.getProcessingCentre())));
+				attributes.getEntities().add(processingCentre);
+			}
+			
+			String instrument = null;
+			if (!modelMission.getSpacecrafts().isEmpty()
+					&& !modelMission.getSpacecrafts().iterator().next().getPayloads().isEmpty()) {
+				instrument = modelMission.getSpacecrafts().iterator().next().getPayloads().get(0).getName();
+			}
+			if (null == modelProduct.getParameters().get(INSTRUMENT_SHORT_NAME.getValue()) && null != instrument) {
+				Entity instrumentShortName = new Entity();
+				instrumentShortName.setType(ProductEdmProvider.ET_STRINGATTRIBUTE_FQN.toString());
+				instrumentShortName
+						.addProperty(new Property(null, ProductEdmProvider.GENERIC_PROP_NAME, ValueType.PRIMITIVE,
+								INSTRUMENT_SHORT_NAME.getValue()))
+						.addProperty(new Property(null, ProductEdmProvider.ET_ATTRIBUTE_PROP_VALUETYPE, ValueType.PRIMITIVE,
+								ProductEdmProvider.ET_STRINGATTRIBUTE_VALUETYPE))
+						.addProperty(new Property(null, ProductEdmProvider.GENERIC_PROP_VALUE, ValueType.PRIMITIVE, instrument));
+				attributes.getEntities().add(instrumentShortName);
+			}
+		}
 		
-		Entity processorName = new Entity();
-		processorName.setType(ProductEdmProvider.ET_STRINGATTRIBUTE_FQN.toString());
-		processorName
-				.addProperty(new Property(null, ProductEdmProvider.GENERIC_PROP_NAME, ValueType.PRIMITIVE, "processorName"))
-				.addProperty(new Property(null, ProductEdmProvider.ET_ATTRIBUTES_PROP_VALUETYPE, ValueType.PRIMITIVE,
-						ProductEdmProvider.ET_STRINGATTRIBUTE_NAME))
-				.addProperty(new Property(null, ProductEdmProvider.GENERIC_PROP_VALUE, ValueType.PRIMITIVE,
-						null == restProduct.getConfiguredProcessor() ? 0 : restProduct.getConfiguredProcessor().getProcessorName()));
-		attributes.getEntities().add(processorName);
+		if (null == modelProduct.getParameters().get(ORBIT_NUMBER.getValue())) {
+			Entity orbitNumber = new Entity();
+			orbitNumber.setType(ProductEdmProvider.ET_INTEGERATTRIBUTE_FQN.toString());
+			orbitNumber
+					.addProperty(
+							new Property(null, ProductEdmProvider.GENERIC_PROP_NAME, ValueType.PRIMITIVE, ORBIT_NUMBER.getValue()))
+					.addProperty(new Property(null, ProductEdmProvider.ET_ATTRIBUTE_PROP_VALUETYPE, ValueType.PRIMITIVE,
+							ProductEdmProvider.ET_INTEGERATTRIBUTE_VALUETYPE))
+					.addProperty(new Property(null, ProductEdmProvider.GENERIC_PROP_VALUE, ValueType.PRIMITIVE,
+							null == modelProduct.getOrbit() ? 0 : modelProduct.getOrbit().getOrbitNumber()));
+			attributes.getEntities().add(orbitNumber);
+		}
 		
-		Entity processorVersion = new Entity();
-		processorVersion.setType(ProductEdmProvider.ET_STRINGATTRIBUTE_FQN.toString());
-		processorVersion
-				.addProperty(new Property(null, ProductEdmProvider.GENERIC_PROP_NAME, ValueType.PRIMITIVE, "processorVersion"))
-				.addProperty(new Property(null, ProductEdmProvider.ET_ATTRIBUTES_PROP_VALUETYPE, ValueType.PRIMITIVE,
-						ProductEdmProvider.ET_STRINGATTRIBUTE_NAME))
-				.addProperty(new Property(null, ProductEdmProvider.GENERIC_PROP_VALUE, ValueType.PRIMITIVE,
-						null == restProduct.getConfiguredProcessor() ? 0 : restProduct.getConfiguredProcessor().getProcessorVersion()));
-		attributes.getEntities().add(processorVersion);
+		if (null == modelProduct.getParameters().get(PROCESSOR_NAME.getValue())) {
+			Entity processorName = new Entity();
+			processorName.setType(ProductEdmProvider.ET_STRINGATTRIBUTE_FQN.toString());
+			processorName
+					.addProperty(new Property(null, ProductEdmProvider.GENERIC_PROP_NAME, ValueType.PRIMITIVE,
+							PROCESSOR_NAME.getValue()))
+					.addProperty(new Property(null, ProductEdmProvider.ET_ATTRIBUTE_PROP_VALUETYPE, ValueType.PRIMITIVE,
+							ProductEdmProvider.ET_STRINGATTRIBUTE_VALUETYPE))
+					.addProperty(new Property(null, ProductEdmProvider.GENERIC_PROP_VALUE, ValueType.PRIMITIVE,
+							null == modelProduct.getConfiguredProcessor() ? ""
+									: modelProduct.getConfiguredProcessor().getProcessor().getProcessorClass().getProcessorName()));
+			attributes.getEntities().add(processorName);
+		}
 		
-		// TODO Add processing level to ProductClass?
-		Entity processingLevel = new Entity();
-		processingLevel.setType(ProductEdmProvider.ET_STRINGATTRIBUTE_FQN.toString());
-		processingLevel
-				.addProperty(new Property(null, ProductEdmProvider.GENERIC_PROP_NAME, ValueType.PRIMITIVE, "processingLevel"))
-				.addProperty(new Property(null, ProductEdmProvider.ET_ATTRIBUTES_PROP_VALUETYPE, ValueType.PRIMITIVE,
-						ProductEdmProvider.ET_STRINGATTRIBUTE_NAME))
-				.addProperty(new Property(null, ProductEdmProvider.GENERIC_PROP_VALUE, ValueType.PRIMITIVE, ""));
-		attributes.getEntities().add(processingLevel);
+		if (null == modelProduct.getParameters().get(PROCESSOR_VERSION.getValue())) {
+			Entity processorVersion = new Entity();
+			processorVersion.setType(ProductEdmProvider.ET_STRINGATTRIBUTE_FQN.toString());
+			processorVersion
+					.addProperty(new Property(null, ProductEdmProvider.GENERIC_PROP_NAME, ValueType.PRIMITIVE,
+							PROCESSOR_VERSION.getValue()))
+					.addProperty(new Property(null, ProductEdmProvider.ET_ATTRIBUTE_PROP_VALUETYPE, ValueType.PRIMITIVE,
+							ProductEdmProvider.ET_STRINGATTRIBUTE_VALUETYPE))
+					.addProperty(new Property(null, ProductEdmProvider.GENERIC_PROP_VALUE, ValueType.PRIMITIVE,
+							null == modelProduct.getConfiguredProcessor() ? ""
+									: modelProduct.getConfiguredProcessor().getProcessor().getProcessorVersion()));
+			attributes.getEntities().add(processorVersion);
+		}
 		
-		Entity processingMode = new Entity();
-		processingMode.setType(ProductEdmProvider.ET_STRINGATTRIBUTE_FQN.toString());
-		processingMode
-				.addProperty(new Property(null, ProductEdmProvider.GENERIC_PROP_NAME, ValueType.PRIMITIVE, "processingMode"))
-				.addProperty(new Property(null, ProductEdmProvider.ET_ATTRIBUTES_PROP_VALUETYPE, ValueType.PRIMITIVE,
-						ProductEdmProvider.ET_STRINGATTRIBUTE_NAME))
-				.addProperty(new Property(null, ProductEdmProvider.GENERIC_PROP_VALUE, ValueType.PRIMITIVE,
-						null == restProduct.getMode() ? 0 : restProduct.getMode()));
-		attributes.getEntities().add(processingMode);
+		if (null == modelProduct.getParameters().get(PROCESSING_LEVEL.getValue())) {
+			Entity processingLevel = new Entity();
+			processingLevel.setType(ProductEdmProvider.ET_STRINGATTRIBUTE_FQN.toString());
+			processingLevel
+					.addProperty(new Property(null, ProductEdmProvider.GENERIC_PROP_NAME, ValueType.PRIMITIVE,
+							PROCESSING_LEVEL.getValue()))
+					.addProperty(new Property(null, ProductEdmProvider.ET_ATTRIBUTE_PROP_VALUETYPE, ValueType.PRIMITIVE,
+							ProductEdmProvider.ET_STRINGATTRIBUTE_VALUETYPE))
+					.addProperty(new Property(null, ProductEdmProvider.GENERIC_PROP_VALUE, ValueType.PRIMITIVE,
+							null == modelProduct.getProductClass().getProcessingLevel() ? ""
+									: modelProduct.getProductClass().getProcessingLevel()));
+			attributes.getEntities().add(processingLevel);
+		}
 		
-		Entity productClass = new Entity();
-		productClass.setType(ProductEdmProvider.ET_STRINGATTRIBUTE_FQN.toString());
-		productClass
-				.addProperty(new Property(null, ProductEdmProvider.GENERIC_PROP_NAME, ValueType.PRIMITIVE, "productClass"))
-				.addProperty(new Property(null, ProductEdmProvider.ET_ATTRIBUTES_PROP_VALUETYPE, ValueType.PRIMITIVE,
-						ProductEdmProvider.ET_STRINGATTRIBUTE_NAME))
-				.addProperty(new Property(null, ProductEdmProvider.GENERIC_PROP_VALUE, ValueType.PRIMITIVE,
-						restProduct.getFileClass()));
-		attributes.getEntities().add(productClass);
+		if (null == modelProduct.getParameters().get(PROCESSING_MODE.getValue())) {
+			Entity processingMode = new Entity();
+			processingMode.setType(ProductEdmProvider.ET_STRINGATTRIBUTE_FQN.toString());
+			processingMode
+					.addProperty(new Property(null, ProductEdmProvider.GENERIC_PROP_NAME, ValueType.PRIMITIVE,
+							PROCESSING_MODE.getValue()))
+					.addProperty(new Property(null, ProductEdmProvider.ET_ATTRIBUTE_PROP_VALUETYPE, ValueType.PRIMITIVE,
+							ProductEdmProvider.ET_STRINGATTRIBUTE_VALUETYPE))
+					.addProperty(new Property(null, ProductEdmProvider.GENERIC_PROP_VALUE, ValueType.PRIMITIVE,
+							null == modelProduct.getMode() ? "" : modelProduct.getMode()));
+			attributes.getEntities().add(processingMode);
+		}
 		
-		Entity productType = new Entity();
-		productType.setType(ProductEdmProvider.ET_STRINGATTRIBUTE_FQN.toString());
-		productType
-				.addProperty(new Property(null, ProductEdmProvider.GENERIC_PROP_NAME, ValueType.PRIMITIVE, "productType"))
-				.addProperty(new Property(null, ProductEdmProvider.ET_ATTRIBUTES_PROP_VALUETYPE, ValueType.PRIMITIVE,
-						ProductEdmProvider.ET_STRINGATTRIBUTE_NAME))
-				.addProperty(new Property(null, ProductEdmProvider.GENERIC_PROP_VALUE, ValueType.PRIMITIVE,
-						restProduct.getProductClass()));
-		attributes.getEntities().add(productType);
+		if (null == modelProduct.getParameters().get(PRODUCT_TYPE.getValue())) {
+			Entity productType = new Entity();
+			productType.setType(ProductEdmProvider.ET_STRINGATTRIBUTE_FQN.toString());
+			productType
+					.addProperty(
+							new Property(null, ProductEdmProvider.GENERIC_PROP_NAME, ValueType.PRIMITIVE, PRODUCT_TYPE.getValue()))
+					.addProperty(new Property(null, ProductEdmProvider.ET_ATTRIBUTE_PROP_VALUETYPE, ValueType.PRIMITIVE,
+							ProductEdmProvider.ET_STRINGATTRIBUTE_VALUETYPE))
+					.addProperty(new Property(null, ProductEdmProvider.GENERIC_PROP_VALUE, ValueType.PRIMITIVE,
+							modelProduct.getProductClass().getProductType()));
+			attributes.getEntities().add(productType);
+		}
 		
 		// Evaluate product parameters
-		Map<String, RestParameter> parameterMap = new HashMap<>();
-		for (RestParameter param: restProduct.getParameters()) parameterMap.put(param.getKey(), param);
+		Map<String, Parameter> parameterMap = modelProduct.getParameters();
 		
-		if (null != parameterMap.get("revision")) {
-			Entity revisionNumber = new Entity();
-			revisionNumber.setType(ProductEdmProvider.ET_STRINGATTRIBUTE_FQN.toString());
-			revisionNumber
-					.addProperty(new Property(null, ProductEdmProvider.GENERIC_PROP_NAME, ValueType.PRIMITIVE, "revisionNumber"))
-					.addProperty(new Property(null, ProductEdmProvider.ET_ATTRIBUTES_PROP_VALUETYPE, ValueType.PRIMITIVE,
-							ProductEdmProvider.ET_STRINGATTRIBUTE_NAME))
-					.addProperty(new Property(null, ProductEdmProvider.GENERIC_PROP_VALUE, ValueType.PRIMITIVE,
-							parameterMap.get("revision").getParameterValue()));
-			attributes.getEntities().add(revisionNumber);
+		for (Entry<String, Parameter> parameter: parameterMap.entrySet()) {
+			FullQualifiedName entityType = null;
+			Object entityValue = null;
+			String entityValueType = null;
+			switch (parameter.getValue().getParameterType()) {
+			case STRING:
+				entityType = (FullQualifiedName) ProductEdmProvider.ET_STRINGATTRIBUTE_FQN;
+				entityValue = parameter.getValue().getStringValue();
+				entityValueType = ProductEdmProvider.ET_STRINGATTRIBUTE_VALUETYPE;
+				break;
+			case INTEGER:
+				entityType = (FullQualifiedName) ProductEdmProvider.ET_INTEGERATTRIBUTE_FQN;
+				entityValue = parameter.getValue().getIntegerValue();
+				entityValueType = ProductEdmProvider.ET_INTEGERATTRIBUTE_VALUETYPE;
+				break;
+			case DOUBLE:
+				entityType = (FullQualifiedName) ProductEdmProvider.ET_DOUBLEATTRIBUTE_FQN;
+				entityValue = parameter.getValue().getDoubleValue();
+				entityValueType = ProductEdmProvider.ET_DOUBLEATTRIBUTE_VALUETYPE;
+				break;
+			case BOOLEAN:
+				entityType = (FullQualifiedName) ProductEdmProvider.ET_BOOLEANATTRIBUTE_FQN;
+				entityValue = parameter.getValue().getBooleanValue();
+				entityValueType = ProductEdmProvider.ET_BOOLEANATTRIBUTE_VALUETYPE;
+				break;
+			case INSTANT:
+				entityType = (FullQualifiedName) ProductEdmProvider.ET_DATEATTRIBUTE_FQN;
+				entityValue = parameter.getValue().getInstantValue();
+				entityValueType = ProductEdmProvider.ET_DATEATTRIBUTE_VALUETYPE;
+				break;
+			}
+			Entity parameterEntity = new Entity();
+			parameterEntity.setType(entityType.getFullQualifiedNameAsString());
+			parameterEntity
+					.addProperty(new Property(null, ProductEdmProvider.GENERIC_PROP_NAME, ValueType.PRIMITIVE, parameter.getKey()))
+					.addProperty(new Property(null, ProductEdmProvider.ET_ATTRIBUTE_PROP_VALUETYPE, ValueType.PRIMITIVE,
+							entityValueType))
+					.addProperty(new Property(null, ProductEdmProvider.GENERIC_PROP_VALUE, ValueType.PRIMITIVE, entityValue));
+			attributes.getEntities().add(parameterEntity);
 		}
-		// TODO To be confirmed by ESA (not in metadata mapping document)
-		if (null != parameterMap.get("copernicusCollection")) {
-			Entity copernicusCollection = new Entity();
-			copernicusCollection.setType(ProductEdmProvider.ET_STRINGATTRIBUTE_FQN.toString());
-			copernicusCollection
-					.addProperty(
-							new Property(null, ProductEdmProvider.GENERIC_PROP_NAME, ValueType.PRIMITIVE, "copernicusCollection"))
-					.addProperty(new Property(null, ProductEdmProvider.ET_ATTRIBUTES_PROP_VALUETYPE, ValueType.PRIMITIVE,
-							ProductEdmProvider.ET_STRINGATTRIBUTE_NAME))
-					.addProperty(new Property(null, ProductEdmProvider.GENERIC_PROP_VALUE, ValueType.PRIMITIVE,
-							parameterMap.get("copernicusCollection").getParameterValue()));
-			attributes.getEntities().add(copernicusCollection);
-		}
 		
-		
-		// TODO Clarify with ESA whether all other product parameters (if available) shall be expanded, too
-
 		// Add the attributes collection to the product entity
 		Link link = new Link();
 		link.setTitle(ProductEdmProvider.ET_PRODUCT_PROP_ATTRIBUTES);
@@ -266,8 +350,44 @@ public class ProductUtil {
 		product.getNavigationLinks().add(link);
 		
 		// Set product key
-		product.setId(new URI(ProductEdmProvider.ET_PRODUCT_NAME + "('" + restProduct.getUuid() + "')"));
+		product.setId(new URI(ProductEdmProvider.ET_PRODUCT_NAME + "('" + modelProduct.getUuid() + "')"));
 
 		return product;
+	}
+
+	/**
+	 * Create OData compliant geographical footprints (fields "Footprint" and "GeoFootprint")
+	 * 
+	 * @param product the product entity to updated
+	 * @param footprintParameter the "coordinates" parameter to take the footprint values from
+	 */
+	private static void createODataFootprint(Entity product, Parameter footprintParameter) {
+		try {
+			// Coordinates are blank-separated lists of blank- or comma-separated latitude/longitude pairs in counter-clockwise sequence
+			
+			// First normalize coordinates to gml:posList separated by white space (older missions may have gml:coordinates format with comma separation)
+			String footprintPosList = footprintParameter.getStringValue().replaceAll(",", " ");
+			
+			// Convert GML posList to OData list of Point
+			String[] pointValues = footprintPosList.split("\\s+");
+			List<Point> exteriorRing = new ArrayList<>();
+			for (int i = 0; i < pointValues.length / 2; ++i) {
+				// OData has longitude as x-value and latitude as y-value, in contrast to GML
+				Point p = new Point(Geospatial.Dimension.GEOGRAPHY, null);
+				p.setY(Double.parseDouble(pointValues[2 * i])); // Latitude
+				p.setX(Double.parseDouble(pointValues[2 * i + 1])); // Longitude
+				exteriorRing.add(p);
+			}
+			
+			// Create the footprint polygon
+			Polygon footprint = new Polygon(Geospatial.Dimension.GEOGRAPHY, null, new ArrayList<LineString>(),
+					new LineString(Geospatial.Dimension.GEOGRAPHY, null, exteriorRing));
+			product.addProperty(new Property(null, ProductEdmProvider.ET_PRODUCT_PROP_FOOTPRINT, ValueType.PRIMITIVE, footprint));
+
+			product.addProperty(new Property(null, ProductEdmProvider.ET_PRODUCT_PROP_GEO_FOOTPRINT, ValueType.GEOSPATIAL, footprint));
+		} catch (NumberFormatException | ArrayIndexOutOfBoundsException e) {
+			// Log warning, otherwise ignore
+			logger.warn("Cannot convert coordinate string '{}' to OData footprint", footprintParameter.getStringValue());
+		}
 	}
 }

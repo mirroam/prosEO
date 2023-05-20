@@ -5,26 +5,37 @@
  */
 package de.dlr.proseo.planner.util;
 
+import java.math.BigInteger;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Optional;
+import java.util.Set;
 
 import javax.persistence.EntityManager;
 import javax.persistence.PersistenceContext;
+import javax.persistence.Query;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
+import de.dlr.proseo.logging.logger.ProseoLogger;
+import de.dlr.proseo.logging.messages.ProseoMessage;
+import de.dlr.proseo.logging.messages.PlannerMessage;
+import de.dlr.proseo.logging.messages.GeneralMessage;
 import de.dlr.proseo.model.Job;
+import de.dlr.proseo.model.JobStep;
 import de.dlr.proseo.model.ProcessingFacility;
 import de.dlr.proseo.model.ProcessingOrder;
 import de.dlr.proseo.model.enums.OrderState;
+import de.dlr.proseo.model.enums.ProductionType;
 import de.dlr.proseo.model.Job.JobState;
 import de.dlr.proseo.model.service.RepositoryService;
-import de.dlr.proseo.planner.Messages;
+import de.dlr.proseo.planner.ProductionPlanner;
 import de.dlr.proseo.planner.dispatcher.OrderDispatcher;
 
 /**
@@ -34,20 +45,30 @@ import de.dlr.proseo.planner.dispatcher.OrderDispatcher;
  *
  */
 @Component
-@Transactional
 public class OrderUtil {
 	/** Logger for this class */
-	private static Logger logger = LoggerFactory.getLogger(OrderUtil.class);
+	private static ProseoLogger logger = new ProseoLogger(OrderUtil.class);
 
 	/** JPA entity manager */
 	@PersistenceContext
 	private EntityManager em;
 	
+    /**
+     * The job utility instance
+     */
     @Autowired
     private JobUtil jobUtil;
 
+    /**
+     * The order dispatcher instance
+     */
     @Autowired
     private OrderDispatcher orderDispatcher;
+
+    /** The Production Planner instance */
+    @Autowired
+    private ProductionPlanner productionPlanner;
+
 
 	/**
 	 * Cancel the processing order and it jobs and job steps.
@@ -56,42 +77,51 @@ public class OrderUtil {
 	 * @return Result message
 	 */
 	@Transactional
-	public Messages cancel(ProcessingOrder order) {
-		Messages answer = Messages.FALSE;
+	public ProseoMessage cancel(ProcessingOrder order) {
+		if (logger.isTraceEnabled()) logger.trace(">>> cancel({})", (null == order ? "null" : order.getId()));
+		
+		ProseoMessage answer = GeneralMessage.FALSE;
 		if (order != null) {
-			// INITIAL, APPROVED, PLANNED, RELEASED, RUNNING, SUSPENDING, COMPLETED, FAILED, CLOSED
 			switch (order.getOrderState()) {
 			case INITIAL:
 			case APPROVED:
+				answer = PlannerMessage.ORDER_HASTOBE_PLANNED;
+				break;
 			case PLANNED:
-			case RELEASED:
 				for (Job job : order.getJobs()) {
 					jobUtil.cancel(job);
 				}
 				order.setOrderState(OrderState.FAILED);
 				order.incrementVersion();
 				RepositoryService.getOrderRepository().save(order);
-				answer = Messages.ORDER_CANCELED;
+				logOrderState(order);
+				answer = PlannerMessage.ORDER_CANCELED;
 				break;	
+			case RELEASED:
+				answer = PlannerMessage.ORDER_ALREADY_RELEASED;
+				break;
+			case RELEASING:
+				answer = PlannerMessage.ORDER_ALREADY_RELEASING;
+				break;
 			case RUNNING:
-				answer = Messages.ORDER_ALREADY_RUNNING;
+				answer = PlannerMessage.ORDER_ALREADY_RUNNING;
 				break;
 			case SUSPENDING:
-				answer = Messages.ORDER_ALREADY_SUSPENDING;
+				answer = PlannerMessage.ORDER_ALREADY_SUSPENDING;
 				break;
 			case COMPLETED:
-				answer = Messages.ORDER_ALREADY_COMPLETED;
+				answer = PlannerMessage.ORDER_ALREADY_COMPLETED;
 				break;
 			case FAILED:
-				answer = Messages.ORDER_ALREADY_FAILED;
+				answer = PlannerMessage.ORDER_ALREADY_FAILED;
 				break;
 			case CLOSED:
-				answer = Messages.ORDER_ALREADY_CLOSED;
+				answer = PlannerMessage.ORDER_ALREADY_CLOSED;
 				break;
 			default:
 				break;
 			}
-			answer.log(logger, order.getIdentifier());
+			logger.log(answer, order.getIdentifier());
 		}
 		return answer;
 	}
@@ -102,67 +132,143 @@ public class OrderUtil {
 	 * @param order The processing Order
 	 * @return Result message
 	 */
-	@Transactional
-	public Messages reset(ProcessingOrder order) {
-		Messages answer = Messages.FALSE;
+	public ProseoMessage reset(ProcessingOrder order) {
+		if (logger.isTraceEnabled()) logger.trace(">>> reset({})", (null == order ? "null" : order.getId()));
+		TransactionTemplate transactionTemplate = new TransactionTemplate(productionPlanner.getTxManager());
+		
+		ProseoMessage answer = GeneralMessage.FALSE;
 		if (order != null) {
-			// INITIAL, APPROVED, PLANNED, RELEASED, RUNNING, SUSPENDING, COMPLETED, FAILED, CLOSED
 			switch (order.getOrderState()) {
 			case INITIAL:
-				answer = Messages.ORDER_RESET;
+				answer = PlannerMessage.ORDER_RESET;
 				break;
-			case APPROVED:
+			case PLANNING:
+				// look for plan thread and interrupt it
+				OrderPlanThread pt = productionPlanner.getPlanThreads().get(ProductionPlanner.PLAN_THREAD_PREFIX + order.getId());
+				if (pt != null) {
+					pt.interrupt();
+					int i = 0;
+					while (pt.isAlive() && i < 1000) {
+						i++;
+						try {
+							Thread.sleep(100);
+						} catch (InterruptedException e) {
+							// TODO Auto-generated catch block
+							e.printStackTrace();
+							break;
+						}
+					}
+				}
+				try {
+					productionPlanner.acquireThreadSemaphore("OrderUtil.reset");
+					transactionTemplate.execute((status) -> {
+						Optional<ProcessingOrder> opt = RepositoryService.getOrderRepository().findById(order.getId());
+						if (opt.isPresent()) {
+							ProcessingOrder orderx = opt.get();
+							orderx.setOrderState(OrderState.APPROVED);
+							orderx.setHasFailedJobSteps(false);
+							orderx.incrementVersion();
+							RepositoryService.getOrderRepository().save(orderx);
+							logOrderState(orderx);
+						}
+						return null;
+					});
+				} catch (Exception e) {
+					answer = GeneralMessage.RUNTIME_EXCEPTION_ENCOUNTERED;
+					logger.log(answer, e.getMessage());
+				} finally {
+					productionPlanner.releaseThreadSemaphore("OrderUtil.reset");
+				}
+				answer = PlannerMessage.ORDER_RESET;
+				break;	
+			case PLANNING_FAILED:
 				// jobs are in initial state, no change
-				order.setOrderState(OrderState.INITIAL);
-				order.setHasFailedJobSteps(false);
-				order.incrementVersion();
-				RepositoryService.getOrderRepository().save(order);
-				answer = Messages.ORDER_RESET;
-				break;		
+				try {
+					productionPlanner.acquireThreadSemaphore("OrderUtil.reset");
+					transactionTemplate.execute((status) -> {
+						Optional<ProcessingOrder> opt = RepositoryService.getOrderRepository().findById(order.getId());
+						if (opt.isPresent()) {
+							ProcessingOrder orderx = opt.get();
+							orderx.setOrderState(OrderState.APPROVED);
+							orderx.setHasFailedJobSteps(false);
+							orderx.incrementVersion();
+							RepositoryService.getOrderRepository().save(orderx);
+							logOrderState(orderx);
+						}
+						return null;
+					});
+				} catch (Exception e) {
+					answer = GeneralMessage.RUNTIME_EXCEPTION_ENCOUNTERED;
+					logger.log(answer, e.getMessage());
+				} finally {
+					productionPlanner.releaseThreadSemaphore("OrderUtil.reset");
+				}
+				answer = PlannerMessage.ORDER_RESET;
+				break;			
+			case APPROVED:		
 			case RELEASED:		
 			case PLANNED:
-				// remove jobs and jobsteps
-				HashMap<Long,Job> toRemove = new HashMap<Long,Job>();
-				for (Job job : order.getJobs()) {
-					if (jobUtil.delete(job)) {
-						toRemove.put(job.getId(), job);
-					}
+				// remove jobs and job steps
+				try {
+					productionPlanner.acquireThreadSemaphore("OrderUtil.reset");
+					transactionTemplate.execute((status) -> {
+						Optional<ProcessingOrder> opt = RepositoryService.getOrderRepository().findById(order.getId());
+						if (opt.isPresent()) {
+							ProcessingOrder orderx = opt.get();
+							HashMap<Long,Job> toRemove = new HashMap<Long,Job>();
+							for (Job job : orderx.getJobs()) {
+								if (jobUtil.delete(job)) {
+									toRemove.put(job.getId(), job);
+								}
+							}
+							List<Job> existingJobs = new ArrayList<Job>();
+							existingJobs.addAll(orderx.getJobs());
+							orderx.getJobs().clear();
+							for (Job job : existingJobs) {
+								if (toRemove.get(job.getId()) == null) {
+									orderx.getJobs().add(job);
+								} else {
+									RepositoryService.getJobRepository().delete(job);
+								}
+							}
+							orderx.setOrderState(OrderState.INITIAL);
+							orderx.setHasFailedJobSteps(false);
+							orderx.incrementVersion();
+							RepositoryService.getOrderRepository().save(orderx);
+							logOrderState(orderx);
+						}
+						return null;
+					});
+				} catch (Exception e) {
+					answer = GeneralMessage.RUNTIME_EXCEPTION_ENCOUNTERED;
+					logger.log(answer, e.getMessage());
+				} finally {
+					productionPlanner.releaseThreadSemaphore("OrderUtil.reset");
 				}
-				List<Job> existingJobs = new ArrayList<Job>();
-				existingJobs.addAll(order.getJobs());
-				order.getJobs().clear();
-				for (Job job : existingJobs) {
-					if (toRemove.get(job.getId()) == null) {
-						order.getJobs().add(job);
-					} else {
-						RepositoryService.getJobRepository().delete(job);
-					}
-				}
-				order.setOrderState(OrderState.INITIAL);
-				order.setHasFailedJobSteps(false);
-				order.incrementVersion();
-				RepositoryService.getOrderRepository().save(order);
-				answer = Messages.ORDER_RESET;
+				answer = PlannerMessage.ORDER_RESET;
 				break;	
+			case RELEASING:
+				answer = PlannerMessage.ORDER_ALREADY_RELEASING;
+				break;
 			case RUNNING:
-				answer = Messages.ORDER_ALREADY_RUNNING;
+				answer = PlannerMessage.ORDER_ALREADY_RUNNING;
 				break;
 			case SUSPENDING:
-				answer = Messages.ORDER_ALREADY_SUSPENDING;
+				answer = PlannerMessage.ORDER_ALREADY_SUSPENDING;
 				break;
 			case COMPLETED:
-				answer = Messages.ORDER_ALREADY_COMPLETED;
+				answer = PlannerMessage.ORDER_ALREADY_COMPLETED;
 				break;
 			case FAILED:
-				answer = Messages.ORDER_ALREADY_FAILED;
+				answer = PlannerMessage.ORDER_ALREADY_FAILED;
 				break;
 			case CLOSED:
-				answer = Messages.ORDER_ALREADY_CLOSED;
+				answer = PlannerMessage.ORDER_ALREADY_CLOSED;
 				break;
 			default:
 				break;
 			}
-			answer.log(logger, order.getIdentifier());
+			logger.log(answer, order.getIdentifier());
 		}
 		return answer;
 	}
@@ -174,16 +280,17 @@ public class OrderUtil {
 	 * @return Result message
 	 */
 	@Transactional
-	public Messages delete(ProcessingOrder order) {
-		Messages answer = Messages.FALSE;
+	public ProseoMessage delete(ProcessingOrder order) {
+		if (logger.isTraceEnabled()) logger.trace(">>> delete({})", (null == order ? "null" : order.getId()));
+		
+		ProseoMessage answer = GeneralMessage.FALSE;
 		if (order != null) {
-			// INITIAL, APPROVED, PLANNED, RELEASED, RUNNING, SUSPENDING, COMPLETED, FAILED, CLOSED
 			switch (order.getOrderState()) {
 			case INITIAL:
 			case APPROVED:
 				// jobs are in initial state, no change
 				RepositoryService.getOrderRepository().delete(order);
-				answer = Messages.ORDER_DELETED;
+				answer = PlannerMessage.ORDER_DELETED;
 				break;				
 			case PLANNED:
 			case COMPLETED:
@@ -203,25 +310,29 @@ public class OrderUtil {
 					if (toRemove.get(job.getId()) == null) {
 						order.getJobs().add(job);
 					} else {
+						job.setProcessingOrder(null);
 						RepositoryService.getJobRepository().delete(job);
 					}
 				}
 				RepositoryService.getOrderRepository().delete(order);
-				answer = Messages.ORDER_DELETED;
+				answer = PlannerMessage.ORDER_DELETED;
+				break;
+			case RELEASING:
+				answer = PlannerMessage.ORDER_ALREADY_RELEASING;
 				break;	
 			case RELEASED:
-				answer = Messages.ORDER_ALREADY_RELEASED;
+				answer = PlannerMessage.ORDER_ALREADY_RELEASED;
 				break;
 			case RUNNING:
-				answer = Messages.ORDER_ALREADY_RUNNING;
+				answer = PlannerMessage.ORDER_ALREADY_RUNNING;
 				break;
 			case SUSPENDING:
-				answer = Messages.ORDER_ALREADY_SUSPENDING;
+				answer = PlannerMessage.ORDER_ALREADY_SUSPENDING;
 				break;
 			default:
 				break;
 			}
-			answer.log(logger, order.getIdentifier());
+			logger.log(answer, order.getIdentifier());
 		}
 		return answer;
 	}
@@ -233,46 +344,51 @@ public class OrderUtil {
 	 * @return Result message
 	 */
 	@Transactional
-	public Messages approve(ProcessingOrder order) {
-		Messages answer = Messages.ORDER_ALREADY_APPROVED;
+	public ProseoMessage approve(ProcessingOrder order) {
+		if (logger.isTraceEnabled()) logger.trace(">>> approve({})", (null == order ? "null" : order.getId()));
+		
+		ProseoMessage answer = PlannerMessage.ORDER_ALREADY_APPROVED;
 		if (order != null) {
-			// INITIAL, APPROVED, PLANNED, RELEASED, RUNNING, SUSPENDING, COMPLETED, FAILED, CLOSED
 			switch (order.getOrderState()) {
 			case INITIAL:
 				// jobs are in initial state, no change
 				order.setOrderState(OrderState.APPROVED);
 				order.incrementVersion();
 				RepositoryService.getOrderRepository().save(order);
-				answer = Messages.ORDER_APPROVED;
+				logOrderState(order);
+				answer = PlannerMessage.ORDER_APPROVED;
 				break;			
 			case APPROVED:
-				answer = Messages.ORDER_ALREADY_APPROVED;
+				answer = PlannerMessage.ORDER_ALREADY_APPROVED;
 				break;
 			case PLANNED:	
-				answer = Messages.ORDER_ALREADY_PLANNED;
+				answer = PlannerMessage.ORDER_ALREADY_PLANNED;
+				break;
+			case RELEASING:
+				answer = PlannerMessage.ORDER_ALREADY_RELEASING;
 				break;
 			case RELEASED:
-				answer = Messages.ORDER_ALREADY_RELEASED;
+				answer = PlannerMessage.ORDER_ALREADY_RELEASED;
 				break;
 			case RUNNING:
-				answer = Messages.ORDER_ALREADY_RUNNING;
+				answer = PlannerMessage.ORDER_ALREADY_RUNNING;
 				break;
 			case SUSPENDING:
-				answer = Messages.ORDER_ALREADY_SUSPENDING;
+				answer = PlannerMessage.ORDER_ALREADY_SUSPENDING;
 				break;
 			case COMPLETED:
-				answer = Messages.ORDER_ALREADY_COMPLETED;
+				answer = PlannerMessage.ORDER_ALREADY_COMPLETED;
 				break;
 			case FAILED:
-				answer = Messages.ORDER_ALREADY_FAILED;
+				answer = PlannerMessage.ORDER_ALREADY_FAILED;
 				break;
 			case CLOSED:
-				answer = Messages.ORDER_ALREADY_CLOSED;
+				answer = PlannerMessage.ORDER_ALREADY_CLOSED;
 				break;
 			default:
 				break;
 			}
-			answer.log(logger, order.getIdentifier());
+			logger.log(answer, order.getIdentifier());
 		}
 		return answer;
 	}
@@ -280,56 +396,96 @@ public class OrderUtil {
 	/**
 	 * Plan the processing order and it jobs and job steps.
 	 * 
-	 * @param order The processing Order
+	 * @param order The processing order
+	 * @param procFacility The processing facility to run the order
 	 * @return Result message
 	 */
-	@Transactional
-	public Messages plan(ProcessingOrder order,  ProcessingFacility procFacility) {
-		Messages answer = Messages.FALSE;
+	public ProseoMessage plan(long id,  ProcessingFacility procFacility, Boolean wait) {
+		TransactionTemplate transactionTemplate = new TransactionTemplate(productionPlanner.getTxManager());
+
+		final ProcessingOrder order = transactionTemplate.execute((status) -> {
+			Optional<ProcessingOrder> orderOpt = RepositoryService.getOrderRepository().findById(id);
+			if (orderOpt.isPresent()) {
+				return orderOpt.get();
+			}
+			return null;
+		});
+		if (logger.isTraceEnabled()) logger.trace(">>> plan({}, {})", (null == order ? "null" : order.getId()),
+				(null == procFacility ? "null" : procFacility.getName()));
+		
+		ProseoMessage answer = GeneralMessage.FALSE;
 		if (order != null && procFacility != null) {
-			// INITIAL, APPROVED, PLANNED, RELEASED, RUNNING, SUSPENDING, COMPLETED, FAILED, CLOSED
 			switch (order.getOrderState()) {
 			case INITIAL:
-				answer = Messages.ORDER_HASTOBE_APPROVED;
+				answer = PlannerMessage.ORDER_HASTOBE_APPROVED;
 				break;
 			case APPROVED:
-				if (orderDispatcher.publishOrder(order, procFacility)) {
-					if (order.getJobs().isEmpty()) {
-						order.setOrderState(OrderState.COMPLETED);
-						answer = Messages.ORDER_COMPLETED;
-					} else {
-						order.setOrderState(OrderState.PLANNED);
-						answer = Messages.ORDER_PLANNED;
+			case PLANNING:
+			case PLANNING_FAILED:
+				try {
+					productionPlanner.acquireThreadSemaphore("plan");
+					answer = transactionTemplate.execute((status) -> {
+						ProseoMessage answerx = GeneralMessage.FALSE;
+						Optional<ProcessingOrder> orderOpt = RepositoryService.getOrderRepository().findById(id);
+						if (orderOpt.isPresent()) {
+							orderOpt.get().setOrderState(OrderState.PLANNING);
+							orderOpt.get().incrementVersion();
+							RepositoryService.getOrderRepository().save(orderOpt.get());
+							answerx = PlannerMessage.ORDER_PLANNING;
+						} else {
+							answerx = PlannerMessage.ORDER_PLANNING_FAILED;
+						}
+						return answerx;
+					});
+				} catch (Exception e) {
+					answer = GeneralMessage.RUNTIME_EXCEPTION_ENCOUNTERED;
+				} finally {
+					productionPlanner.releaseThreadSemaphore("plan");
+				}
+				if (answer.getSuccess()) {
+					String threadName = ProductionPlanner.PLAN_THREAD_PREFIX + order.getId();
+					if (!productionPlanner.getPlanThreads().containsKey(threadName)) {
+						OrderPlanThread pt = new OrderPlanThread(productionPlanner, orderDispatcher, id, procFacility, threadName);
+						productionPlanner.getPlanThreads().put(threadName, pt);
+						pt.start();
+						if (wait) {
+							try {
+								pt.join();
+							} catch (InterruptedException e) {
+								e.printStackTrace();
+							}
+						}
 					}
-					order.incrementVersion();
-					order = RepositoryService.getOrderRepository().save(order);
 				}
 				break;	
 			case PLANNED:	
-				answer = Messages.ORDER_ALREADY_PLANNED;
+				answer = PlannerMessage.ORDER_ALREADY_PLANNED;
+				break;
+			case RELEASING:
+				answer = PlannerMessage.ORDER_ALREADY_RELEASING;
 				break;
 			case RELEASED:
-				answer = Messages.ORDER_ALREADY_RELEASED;
+				answer = PlannerMessage.ORDER_ALREADY_RELEASED;
 				break;
 			case RUNNING:
-				answer = Messages.ORDER_ALREADY_RUNNING;
+				answer = PlannerMessage.ORDER_ALREADY_RUNNING;
 				break;
 			case SUSPENDING:
-				answer = Messages.ORDER_ALREADY_SUSPENDING;
+				answer = PlannerMessage.ORDER_ALREADY_SUSPENDING;
 				break;
 			case COMPLETED:
-				answer = Messages.ORDER_ALREADY_COMPLETED;
+				answer = PlannerMessage.ORDER_ALREADY_COMPLETED;
 				break;
 			case FAILED:
-				answer = Messages.ORDER_ALREADY_FAILED;
+				answer = PlannerMessage.ORDER_ALREADY_FAILED;
 				break;
 			case CLOSED:
-				answer = Messages.ORDER_ALREADY_CLOSED;
+				answer = PlannerMessage.ORDER_ALREADY_CLOSED;
 				break;
 			default:
 				break;
 			}
-			answer.log(logger, order.getIdentifier());
+			logger.log(answer, order.getIdentifier());
 		}
 		return answer;
 	}
@@ -340,54 +496,100 @@ public class OrderUtil {
 	 * @param order The processing Order
 	 * @return Result message
 	 */
-	@Transactional
-	public Messages resume(ProcessingOrder order) {
-		Messages answer = Messages.FALSE;
+	public ProseoMessage resume(ProcessingOrder order, Boolean wait) {
+		if (logger.isTraceEnabled()) logger.trace(">>> resume({})", (null == order ? "null" : order.getId()));
+		
+		ProseoMessage answer = GeneralMessage.FALSE;
 		if (order != null) {
-			// INITIAL, APPROVED, PLANNED, RELEASED, RUNNING, SUSPENDING, COMPLETED, FAILED, CLOSED
 			switch (order.getOrderState()) {
 			case INITIAL:
-				answer = Messages.ORDER_HASTOBE_APPROVED;
+				answer = PlannerMessage.ORDER_HASTOBE_APPROVED;
 				break;
 			case APPROVED:
-				answer = Messages.ORDER_HASTOBE_PLANNED;
+			case PLANNING:
+				answer = PlannerMessage.ORDER_HASTOBE_PLANNED;
 				break;
 			case PLANNED:
-				for (Job job : order.getJobs()) {
-					jobUtil.resume(job);
+			case RELEASING:
+				TransactionTemplate transactionTemplate = new TransactionTemplate(productionPlanner.getTxManager());
+				Boolean doIt = false;
+				try {
+					productionPlanner.acquireThreadSemaphore("resume");	
+					doIt = transactionTemplate.execute((status) -> {
+						Optional<ProcessingOrder> opt = RepositoryService.getOrderRepository().findById(order.getId());
+						if (opt.isPresent()) {
+							ProcessingOrder orderx = opt.get();
+							orderx.setOrderState(OrderState.RELEASING);
+							orderx.incrementVersion();
+							orderx = RepositoryService.getOrderRepository().save(orderx);
+							return true;
+						}
+						return false;
+					});
+				} catch (Exception e) {
+					logger.log(GeneralMessage.RUNTIME_EXCEPTION_ENCOUNTERED, e.getMessage());
+				} finally {
+					productionPlanner.releaseThreadSemaphore("resume");					
 				}
-				if (order.getJobs().isEmpty()) {
-					order.setOrderState(OrderState.COMPLETED);
-					answer = Messages.ORDER_COMPLETED;
-				} else {
-					order.setOrderState(OrderState.RELEASED);
-					answer = Messages.ORDER_RELEASED;
+				if (doIt) {
+					OrderReleaseThread rt = null; 
+					try {
+						productionPlanner.acquireThreadSemaphore("resume");	
+						final ProcessingOrder ordery = transactionTemplate.execute((status) -> {
+							Optional<ProcessingOrder> orderOpt = RepositoryService.getOrderRepository().findById(order.getId());
+							if (orderOpt.isPresent()) {
+								return orderOpt.get();
+							}
+							return null;
+						});
+						if (ordery != null) {
+							String threadName = ProductionPlanner.RELEASE_THREAD_PREFIX + ordery.getId();
+							if (!productionPlanner.getReleaseThreads().containsKey(threadName)) {
+								rt = new OrderReleaseThread(productionPlanner, em, jobUtil, ordery, threadName);
+								productionPlanner.getReleaseThreads().put(threadName, rt);
+							}
+							logOrderState(order);
+							answer = PlannerMessage.ORDER_RELEASING;
+						}
+					} catch (Exception e) {
+						logger.log(GeneralMessage.RUNTIME_EXCEPTION_ENCOUNTERED, e.getMessage());
+					} finally {
+						productionPlanner.releaseThreadSemaphore("resume");					
+					}
+					if (rt != null) {
+						rt.start();
+						if (wait) {
+							try {
+								rt.join();
+							} catch (InterruptedException e) {
+								e.printStackTrace();
+							}
+						}
+					}
 				}
-				order.incrementVersion();
-				RepositoryService.getOrderRepository().save(order);
 				break;	
 			case RELEASED:
-				answer = Messages.ORDER_ALREADY_RELEASED;
+				answer = PlannerMessage.ORDER_ALREADY_RELEASED;
 				break;
 			case RUNNING:
-				answer = Messages.ORDER_ALREADY_RUNNING;
+				answer = PlannerMessage.ORDER_ALREADY_RUNNING;
 				break;
 			case SUSPENDING:
-				answer = Messages.ORDER_ALREADY_SUSPENDING;
+				answer = PlannerMessage.ORDER_ALREADY_SUSPENDING;
 				break;
 			case COMPLETED:
-				answer = Messages.ORDER_ALREADY_COMPLETED;
+				answer = PlannerMessage.ORDER_ALREADY_COMPLETED;
 				break;
 			case FAILED:
-				answer = Messages.ORDER_ALREADY_FAILED;
+				answer = PlannerMessage.ORDER_ALREADY_FAILED;
 				break;
 			case CLOSED:
-				answer = Messages.ORDER_ALREADY_CLOSED;
+				answer = PlannerMessage.ORDER_ALREADY_CLOSED;
 				break;
 			default:
 				break;
 			}
-			answer.log(logger, order.getIdentifier());
+			logger.log(answer, order.getIdentifier());
 		}
 		return answer;
 	}
@@ -399,126 +601,344 @@ public class OrderUtil {
 	 * @return Result message
 	 */
 	@Transactional
-	public Messages startOrder(ProcessingOrder order) {
-		Messages answer = Messages.FALSE;
+	public ProseoMessage startOrder(ProcessingOrder order) {
+		if (logger.isTraceEnabled()) logger.trace(">>> startOrder({})", (null == order ? "null" : order.getId()));
+		
+		ProseoMessage answer = GeneralMessage.FALSE;
 		if (order != null) {
-			// INITIAL, APPROVED, PLANNED, RELEASED, RUNNING, SUSPENDING, COMPLETED, FAILED, CLOSED
 			switch (order.getOrderState()) {
 			case INITIAL:
-				answer = Messages.ORDER_HASTOBE_APPROVED;
+				answer = PlannerMessage.ORDER_HASTOBE_APPROVED;
 				break;
 			case APPROVED:
-				answer = Messages.ORDER_HASTOBE_PLANNED;
+				answer = PlannerMessage.ORDER_HASTOBE_PLANNED;
 				break;
 			case PLANNED:
-				answer = Messages.ORDER_HASTOBE_RELEASED;
-				break;				
+				answer = PlannerMessage.ORDER_HASTOBE_RELEASED;
+				break;	
+			case RELEASING:
+				answer = PlannerMessage.ORDER_ALREADY_RELEASING;	
+				break;		
 			case RELEASED:
 				order.setOrderState(OrderState.RUNNING);
 				order.incrementVersion();
 				RepositoryService.getOrderRepository().save(order);
-				answer = Messages.ORDER_RELEASED;
+				logOrderState(order);
+				answer = PlannerMessage.ORDER_RUNNING;
 				break;				
 			case RUNNING:
-				answer = Messages.ORDER_RUNNING;
+				answer = PlannerMessage.ORDER_RUNNING;
 				break;	
 			case SUSPENDING:
-				answer = Messages.ORDER_ALREADY_SUSPENDING;
+				answer = PlannerMessage.ORDER_ALREADY_SUSPENDING;
 				break;
 			case COMPLETED:
-				answer = Messages.ORDER_ALREADY_COMPLETED;
+				answer = PlannerMessage.ORDER_ALREADY_COMPLETED;
 				break;
 			case FAILED:
-				answer = Messages.ORDER_ALREADY_FAILED;
+				answer = PlannerMessage.ORDER_ALREADY_FAILED;
 				break;
 			case CLOSED:
-				answer = Messages.ORDER_ALREADY_CLOSED;
+				answer = PlannerMessage.ORDER_ALREADY_CLOSED;
 				break;
 			default:
 				break;
 			}
-			answer.log(logger, order.getIdentifier());
+			logger.log(answer, order.getIdentifier());
 		}
 		return answer;
 	}
 
 	/**
-	 * Suspend the processing order and it jobs and job steps.
+	 * Suspend the processing order and its jobs and job steps.
 	 * 
-	 * @param order The processing Order
+	 * @param order The processing order id
+	 * @param force The flag to force kill of currently running job steps on processing facility
 	 * @return Result message
 	 */
-	@Transactional
-	public Messages suspend(ProcessingOrder order, Boolean force) {
-		Messages answer = Messages.FALSE;
+	public ProseoMessage suspend(long id, Boolean force) {
+		TransactionTemplate transactionTemplate = new TransactionTemplate(productionPlanner.getTxManager());
+
+		final ProcessingOrder order = transactionTemplate.execute((status) -> {
+			Optional<ProcessingOrder> orderOpt = RepositoryService.getOrderRepository().findById(id);
+			if (orderOpt.isPresent()) {
+				return orderOpt.get();
+			}
+			return null;
+		});
+		if (logger.isTraceEnabled()) logger.trace(">>> suspend({}, {})", (null == order ? "null" : order.getId()), force);
+		ProseoMessage answer = GeneralMessage.FALSE;
 		if (order != null) {
-			// INITIAL, APPROVED, PLANNED, RELEASED, RUNNING, SUSPENDING, COMPLETED, FAILED, CLOSED
 			switch (order.getOrderState()) {
 			case INITIAL:
-				answer = Messages.ORDER_SUSPENDED;
+				answer = PlannerMessage.ORDER_SUSPENDED;
 				break;
 			case APPROVED:
-				answer = Messages.ORDER_SUSPENDED;
+				answer = PlannerMessage.ORDER_SUSPENDED;
 				break;
 			case PLANNED:	
-				answer = Messages.ORDER_SUSPENDED;
+				answer = PlannerMessage.ORDER_SUSPENDED;
 				break;
-			case RELEASED:
-				for (Job job : order.getJobs()) {
-					jobUtil.suspend(job, force);
-				}
-				order.setOrderState(OrderState.PLANNED);
-				order.incrementVersion();
-				RepositoryService.getOrderRepository().save(order);
-				answer = Messages.ORDER_SUSPENDED;
-				break;			
+			case RELEASING:
 			case RUNNING:
 			case SUSPENDING:
-				Boolean suspending = false;
-				Boolean allFinished = true;
-				for (Job job : order.getJobs()) {
-					jobUtil.suspend(job, force);
-					// check for state
-					if (job.getJobState() == JobState.COMPLETED || job.getJobState() == JobState.RELEASED) {
-						allFinished = allFinished & true;
-					} else {
-						allFinished = allFinished & false;
-					}
-					if (job.getJobState() == JobState.ON_HOLD || job.getJobState() == JobState.STARTED) {
-						suspending = true;
+				// look for plan thread and interrupt it
+				OrderReleaseThread rt = productionPlanner.getReleaseThreads().get(ProductionPlanner.RELEASE_THREAD_PREFIX + order.getId());
+				if (rt != null) {
+					rt.interrupt();
+					int i = 0;
+					while (rt.isAlive() && i < 1000) {
+						i++;
+						try {
+							Thread.sleep(100);
+						} catch (InterruptedException e) {
+							// TODO Auto-generated catch block
+							e.printStackTrace();
+							break;
+						}
 					}
 				}
-				order.incrementVersion();
-				if (suspending) {
-					// check whether some jobs are already finished
-					order.setOrderState(OrderState.SUSPENDING);
-					RepositoryService.getOrderRepository().save(order);
-					answer = Messages.ORDER_SUSPENDED;
-				} else if (allFinished) {
-					// check whether some jobs are already finished
-					order.setOrderState(OrderState.COMPLETED);
-					RepositoryService.getOrderRepository().save(order);
-					answer = Messages.ORDER_COMPLETED;
-				} else {
-					order.setOrderState(OrderState.SUSPENDING); // direct transition to PLANNED not allowed
-					order.setOrderState(OrderState.PLANNED);
-					RepositoryService.getOrderRepository().save(order);
-					answer = Messages.ORDER_SUSPENDED;
+				try {
+					productionPlanner.acquireThreadSemaphore("suspend");	
+					transactionTemplate.execute((status) -> {
+						ProcessingOrder ordery = null;
+						Optional<ProcessingOrder> orderOpt = RepositoryService.getOrderRepository().findById(id);
+						if (orderOpt.isPresent()) {
+							ordery = orderOpt.get();
+						}
+						if (ordery == null) {
+							return null;
+						}
+						if (ordery.getOrderState() == OrderState.RELEASING) {
+							ordery.setOrderState(OrderState.RELEASED);
+							ordery.setOrderState(OrderState.RUNNING);
+						}
+						ordery.setOrderState(OrderState.SUSPENDING);
+						RepositoryService.getOrderRepository().save(ordery);
+						return ordery;
+					});
+					answer = transactionTemplate.execute((status) -> {
+						Boolean suspending = false;
+						Boolean allFinished = true;
+						ProcessingOrder orderz = null;
+						Optional<ProcessingOrder> orderOpt = RepositoryService.getOrderRepository().findById(id);
+						if (orderOpt.isPresent()) {
+							orderz = orderOpt.get();
+						}
+						if (orderz == null) {
+							return PlannerMessage.ORDER_NOT_EXIST;
+						}
+						for (Job job : orderz.getJobs()) {
+							jobUtil.suspend(job, force);
+							// check for state
+							if (job.getJobState() == JobState.COMPLETED || job.getJobState() == JobState.RELEASED) {
+								allFinished = allFinished & true;
+							} else {
+								allFinished = allFinished & false;
+							}
+							if (job.getJobState() == JobState.ON_HOLD || job.getJobState() == JobState.STARTED) {
+								suspending = true;
+							}
+						}
+						orderz.incrementVersion();
+						if (orderz.getOrderState() == OrderState.RUNNING) {
+							orderz.setOrderState(OrderState.SUSPENDING);
+						}
+						if (suspending) {
+							// check whether some jobs are already finished
+							orderz.setOrderState(OrderState.SUSPENDING);
+							RepositoryService.getOrderRepository().save(orderz);
+							logOrderState(orderz);		
+							return PlannerMessage.ORDER_SUSPENDED;
+						} else if (allFinished) {
+							// check whether some jobs are already finished
+							orderz.setOrderState(OrderState.COMPLETED);
+							checkAutoClose(order);
+							RepositoryService.getOrderRepository().save(orderz);
+							logOrderState(orderz);			
+							return  PlannerMessage.ORDER_COMPLETED;
+						} else {
+							orderz.setOrderState(OrderState.PLANNED);
+							RepositoryService.getOrderRepository().save(orderz);
+							logOrderState(orderz);			
+							return  PlannerMessage.ORDER_SUSPENDED;
+						}
+					});
+				} catch (Exception e) {
+					logger.log(GeneralMessage.RUNTIME_EXCEPTION_ENCOUNTERED, e.getMessage());
+				} finally {
+					productionPlanner.releaseThreadSemaphore("suspend");
+					productionPlanner.checkNextForRestart();					
 				}
 				break;	
+			case RELEASED:
+				try {
+					productionPlanner.acquireThreadSemaphore("suspend");	
+					answer = transactionTemplate.execute((status) -> {
+						ProcessingOrder orderz = null;
+						Optional<ProcessingOrder> orderOpt = RepositoryService.getOrderRepository().findById(id);
+						if (orderOpt.isPresent()) {
+							orderz = orderOpt.get();
+						}
+						if (orderz == null) {
+							return PlannerMessage.ORDER_NOT_EXIST;
+						}
+						for (Job job : orderz.getJobs()) {
+							jobUtil.suspend(job, force);
+						}
+						if (orderz.getOrderState() == OrderState.RELEASED) {
+							orderz.setOrderState(OrderState.SUSPENDING);
+						}
+						if (orderz.getOrderState() == OrderState.RUNNING) {
+							orderz.setOrderState(OrderState.SUSPENDING);
+						}
+						orderz.setOrderState(OrderState.PLANNED);
+						orderz.incrementVersion();
+						RepositoryService.getOrderRepository().save(orderz);
+						logOrderState(orderz);
+						return PlannerMessage.ORDER_SUSPENDED;
+					});
+				} catch (Exception e) {
+					logger.log(GeneralMessage.RUNTIME_EXCEPTION_ENCOUNTERED, e.getMessage());
+				} finally {
+					productionPlanner.releaseThreadSemaphore("suspend");	
+					productionPlanner.checkNextForRestart();				
+				}
+				break;			
 			case COMPLETED:
-				answer = Messages.ORDER_ALREADY_COMPLETED;
+				answer = PlannerMessage.ORDER_ALREADY_COMPLETED;
 				break;
 			case FAILED:
-				answer = Messages.ORDER_ALREADY_FAILED;
+				answer = PlannerMessage.ORDER_ALREADY_FAILED;
 				break;
 			case CLOSED:
-				answer = Messages.ORDER_ALREADY_CLOSED;
+				answer = PlannerMessage.ORDER_ALREADY_CLOSED;
 				break;
 			default:
 				break;
 			}
-			answer.log(logger, order.getIdentifier());
+			logger.log(answer, order.getIdentifier());
+		}
+		return answer;
+	}
+
+	/**
+	 * Prepare the suspend of the processing order.
+	 * All jobs are set to state ON_HOLD first to avoid start of further job steps.
+	 * 
+	 * @param order The processing order id
+	 * @param force The flag to force kill of currently running job steps on processing facility
+	 * @return Result message
+	 */
+	public ProseoMessage prepareSuspend(long id, Boolean force) {
+		TransactionTemplate transactionTemplate = new TransactionTemplate(productionPlanner.getTxManager());
+		final ProcessingOrder order = transactionTemplate.execute((status) -> {
+			Optional<ProcessingOrder> orderOpt = RepositoryService.getOrderRepository().findById(id);
+			if (orderOpt.isPresent()) {
+				return orderOpt.get();
+			}
+			return null;
+		});
+		if (logger.isTraceEnabled()) logger.trace(">>> prepareSuspend({}, {})", (null == order ? "null" : order.getId()), force);
+		ProseoMessage answer = GeneralMessage.FALSE;
+		if (order != null) {
+			switch (order.getOrderState()) {
+			case INITIAL:
+				answer = PlannerMessage.ORDER_SUSPENDED;
+				break;
+			case APPROVED:
+				answer = PlannerMessage.ORDER_SUSPENDED;
+				break;
+			case PLANNED:	
+				answer = PlannerMessage.ORDER_SUSPENDED;
+				break;
+			case RELEASING:
+			case RELEASED:
+			case RUNNING:
+			case SUSPENDING:
+				// look for plan thread and interrupt it
+				answer = GeneralMessage.TRUE;
+				OrderReleaseThread rt = productionPlanner.getReleaseThreads().get(ProductionPlanner.RELEASE_THREAD_PREFIX + order.getId());
+				if (rt != null) {
+					rt.interrupt();
+					int i = 0;
+					while (rt.isAlive() && i < 1000) {
+						i++;
+						try {
+							Thread.sleep(1000);
+							rt.interrupt();
+						} catch (InterruptedException e) {
+							// TODO Auto-generated catch block
+							e.printStackTrace();
+							break;
+						}
+					}
+					if (rt.isAlive()) {
+						answer = PlannerMessage.ORDER_COULD_NOT_INTERRUPT;
+					}
+				}
+				if (answer.getSuccess()) {
+					try {
+						productionPlanner.acquireThreadSemaphore("prepareSuspend");	
+						transactionTemplate.execute((status) -> {
+							ProcessingOrder orderz = null;
+							Optional<ProcessingOrder> orderOpt = RepositoryService.getOrderRepository().findById(id);
+							if (orderOpt.isPresent()) {
+								orderz = orderOpt.get();
+							}
+							if (orderz.getOrderState() == OrderState.RELEASING) {
+								orderz.setOrderState(OrderState.RELEASED);
+								orderz.setOrderState(OrderState.RUNNING);
+							}
+							orderz.setOrderState(OrderState.SUSPENDING);
+							RepositoryService.getOrderRepository().save(orderz);
+							return null;
+						});
+						transactionTemplate.execute((status) -> {
+							ProcessingOrder orderz = null;
+							Optional<ProcessingOrder> orderOpt = RepositoryService.getOrderRepository().findById(id);
+							if (orderOpt.isPresent()) {
+								orderz = orderOpt.get();
+							}
+							for (Job job : orderz.getJobs()) {
+								switch (job.getJobState()) {
+								case INITIAL:
+									job.setJobState(de.dlr.proseo.model.Job.JobState.RELEASED);
+									// intentionally fall through
+								case RELEASED:
+									job.setJobState(de.dlr.proseo.model.Job.JobState.STARTED);
+									// intentionally fall through
+								case STARTED:
+									job.setJobState(de.dlr.proseo.model.Job.JobState.ON_HOLD);
+									RepositoryService.getJobRepository().save(job);
+									break;
+								default:
+									break;						
+								}
+							}
+							return null;
+						});
+						answer = PlannerMessage.ORDER_SUSPEND_PREPARED;
+					} catch (Exception e) {
+						logger.log(GeneralMessage.RUNTIME_EXCEPTION_ENCOUNTERED, e.getMessage());
+					} finally {
+						productionPlanner.releaseThreadSemaphore("prepareSuspend");					
+					}
+				}
+				break;	
+			case COMPLETED:
+				answer = PlannerMessage.ORDER_ALREADY_COMPLETED;
+				break;
+			case FAILED:
+				answer = PlannerMessage.ORDER_ALREADY_FAILED;
+				break;
+			case CLOSED:
+				answer = PlannerMessage.ORDER_ALREADY_CLOSED;
+				break;
+			default:
+				break;
+			}
+			logger.log(answer, order.getIdentifier());
 		}
 		return answer;
 	}
@@ -530,19 +950,21 @@ public class OrderUtil {
 	 * @return Result message
 	 */
 	@Transactional
-	public Messages retry(ProcessingOrder order) {
-		Messages answer = Messages.FALSE;
+	public ProseoMessage retry(ProcessingOrder order) {
+		if (logger.isTraceEnabled()) logger.trace(">>> retry({})", (null == order ? "null" : order.getId()));
+		
+		ProseoMessage answer = GeneralMessage.FALSE;
 		if (order != null) {
-			// INITIAL, APPROVED, PLANNED, RELEASED, RUNNING, SUSPENDING, COMPLETED, FAILED, CLOSED
 			switch (order.getOrderState()) {
 			case INITIAL:
 			case APPROVED:
-			case PLANNED:	
+			case PLANNED:
+			case RELEASING:
 			case RELEASED:
 			case RUNNING:
 			case SUSPENDING:
 			case COMPLETED:
-				answer = Messages.ORDER_COULD_NOT_RETRY;
+				answer = PlannerMessage.ORDER_COULD_NOT_RETRY;
 				break;
 			case FAILED:
 				Boolean all = true;
@@ -552,7 +974,7 @@ public class OrderUtil {
 					jobUtil.retry(job);
 				}
 				for (Job job : order.getJobs()) {
-					if (!(job.getJobState() == JobState.INITIAL || job.getJobState() == JobState.COMPLETED)) {
+					if (!(job.getJobState() == JobState.PLANNED || job.getJobState() == JobState.COMPLETED)) {
 						all = false;
 					}
 					if (job.getJobState() != JobState.COMPLETED) {
@@ -563,28 +985,40 @@ public class OrderUtil {
 					}
 				}
 				if (all) {
-					if (allCompleted) {
+					if (order.getOrderState() == OrderState.COMPLETED) {
+						answer = PlannerMessage.ORDER_COMPLETED;
+					} else if (allCompleted) {
+						if (order.getOrderState() != OrderState.RUNNING) {
+							order.setOrderState(OrderState.PLANNED);
+							order.setOrderState(OrderState.RELEASED);
+							order.setOrderState(OrderState.RUNNING);
+						}
 						order.setOrderState(OrderState.COMPLETED);
+						checkAutoClose(order);
 						order.incrementVersion();
 						RepositoryService.getOrderRepository().save(order);
-						answer = Messages.ORDER_COMPLETED;
+						answer = PlannerMessage.ORDER_COMPLETED;
 					} else {
+						if (order.getOrderState() == OrderState.RUNNING) {
+							order.setOrderState(OrderState.SUSPENDING);
+						}
 						order.setOrderState(OrderState.PLANNED);
 						order.incrementVersion();
 						RepositoryService.getOrderRepository().save(order);
-						answer = Messages.ORDER_RETRIED;
+						answer = PlannerMessage.ORDER_RETRIED;
 					}
+					logOrderState(order);
 				} else {
-					answer = Messages.ORDER_COULD_NOT_RETRY;
+					answer = PlannerMessage.ORDER_COULD_NOT_RETRY;
 				}
 				break;
 			case CLOSED:
-				answer = Messages.ORDER_ALREADY_CLOSED;
+				answer = PlannerMessage.ORDER_ALREADY_CLOSED;
 				break;
 			default:
 				break;
 			}
-			answer.log(logger, order.getIdentifier());
+			logger.log(answer, order.getIdentifier());
 		}
 		return answer;
 	}
@@ -595,35 +1029,75 @@ public class OrderUtil {
 	 * @param order The processing Order
 	 * @return Result message
 	 */
-	@Transactional
-	public Messages close(ProcessingOrder order) {
-		Messages answer = Messages.FALSE;
-		if (order != null) {
-			// INITIAL, APPROVED, PLANNED, RELEASED, RUNNING, SUSPENDING, COMPLETED, FAILED, CLOSED
-			switch (order.getOrderState()) {
+	public ProseoMessage close(Long orderId) {
+		if (logger.isTraceEnabled()) logger.trace(">>> close({})", (null == orderId ? "null" : orderId));
+
+		TransactionTemplate transactionTemplate = new TransactionTemplate(productionPlanner.getTxManager());
+		List<Long> jobIds = new ArrayList<Long>();
+		
+		final OrderState orderState = transactionTemplate.execute((status) -> {
+			String sqlQuery = "select order_state from processing_order where id = " + orderId + ";";
+			Query query = em.createNativeQuery(sqlQuery);
+			Object o = query.getSingleResult();
+			return OrderState.valueOf((String)o);			
+		});
+		final Object dummy = transactionTemplate.execute((status) -> {
+			String sqlQuery = "select id from job where processing_order_id = " + orderId + ";";
+			Query query = em.createNativeQuery(sqlQuery);
+			List<?> ol = query.getResultList();
+			for (Object o : ol) {
+				if (o instanceof BigInteger) {
+					jobIds.add(((BigInteger)o).longValue());
+				}
+			}
+			return null;
+		});
+		ProseoMessage answer = GeneralMessage.FALSE;
+		if (orderId != null) {
+			switch (orderState) {
 			case INITIAL:
 			case APPROVED:
 			case PLANNED:	
+			case RELEASING:
 			case RELEASED:
 			case RUNNING:
 			case SUSPENDING:
-				answer = Messages.ORDER_HASTOBE_FINISHED;
+				answer = PlannerMessage.ORDER_HASTOBE_FINISHED;
 				break;
 			case COMPLETED:
 			case FAILED:
 				// job steps are completed/failed
-				order.setOrderState(OrderState.CLOSED);
-				order.incrementVersion();
-				RepositoryService.getOrderRepository().save(order);
-				answer = Messages.ORDER_CLOSED;
+				for (Long jobId : jobIds) {
+					jobUtil.close(jobId);
+				}
+				final Object dummy2 = transactionTemplate.execute((status) -> {
+					Optional<ProcessingOrder> orderOpt = RepositoryService.getOrderRepository().findById(orderId);
+					if (orderOpt.isPresent()) {
+						ProcessingOrder locOrder = orderOpt.get();
+						Duration retPeriod = locOrder.getMission().getOrderRetentionPeriod();
+						if (retPeriod != null && locOrder.getProductionType() == ProductionType.SYSTEMATIC) {
+							locOrder.setEvictionTime(Instant.now().plus(retPeriod));
+						}
+						if (locOrder.getOrderState() == OrderState.RUNNING) {
+							locOrder.setOrderState(OrderState.FAILED);
+						}
+						locOrder.setOrderState(OrderState.CLOSED);
+						locOrder.incrementVersion();
+						RepositoryService.getOrderRepository().save(locOrder);
+						logOrderState(locOrder);
+					}
+					return null;
+				});
+				answer = PlannerMessage.ORDER_CLOSED;
 				break;			
 			case CLOSED:
-				answer = Messages.ORDER_CLOSED;
+				answer = PlannerMessage.ORDER_CLOSED;
 				break;
 			default:
 				break;
 			}
-			answer.log(logger, order.getIdentifier());
+			// don't log here, it is done by the caller
+			// logger.log(answer, order.getIdentifier());
 		}
 		return answer;
 	}
@@ -634,11 +1108,18 @@ public class OrderUtil {
 	 * @param order The processing Order
 	 * @return true after success
 	 */
-	@Transactional
-	public Boolean checkFinish(ProcessingOrder order) {
+	public Boolean checkFinish(Long orderId) {
+		if (logger.isTraceEnabled()) logger.trace(">>> checkFinish({})", orderId);
+		
 		Boolean answer = false;	
+		Boolean checkFurther = false;
+		Boolean hasChanged = false;
+		ProcessingOrder order = null;
+		Optional<ProcessingOrder> oOrder = RepositoryService.getOrderRepository().findById(orderId);
+		if (oOrder.isPresent()) {
+			order = oOrder.get();
+		}
 		// check current state for possibility to be suspended
-		// INITIAL, RELEASED, STARTED, ON_HOLD, COMPLETED, FAILED
 		if (order != null) {
 			switch (order.getOrderState()) {
 			case INITIAL:
@@ -651,9 +1132,10 @@ public class OrderUtil {
 					Boolean all = RepositoryService.getJobRepository().countJobNotFinishedByProcessingOrderId(order.getId()) == 0;
 					if (!all) {
 						order.setOrderState(OrderState.PLANNED);
-						order.incrementVersion();
 						RepositoryService.getOrderRepository().save(order);
 						em.merge(order);
+						hasChanged = true;
+						checkFurther = true;
 						answer = true;
 						break;
 					}
@@ -666,27 +1148,97 @@ public class OrderUtil {
 					Boolean completed = RepositoryService.getJobRepository().countJobFailedByProcessingOrderId(order.getId()) == 0;
 					if (completed) {
 						order.setOrderState(OrderState.COMPLETED);
-						order.incrementVersion();
+						checkAutoClose(order);
 					} else {
 						order.setOrderState(OrderState.FAILED);
-						order.incrementVersion();
 					}
+					checkFurther = true;
 					RepositoryService.getOrderRepository().save(order);
 					em.merge(order);
+					hasChanged = true;
 				}
 				answer = true;
 				break;
 			case COMPLETED:
 			case FAILED:
+				checkFurther = true;
+				answer = true;
+				break;
+			case CLOSED:
+				checkAutoClose(order);
 				answer = true;
 				break;
 			default:
 				break;
 			}	
+			if (checkFurther) {
+				Boolean hasFailed = false;
+				for (Job j : order.getJobs()) {
+					if (j.getJobState() == JobState.FAILED) {
+						hasFailed = true;
+						break;
+					}
+				}
+				if (order.getHasFailedJobSteps() != hasFailed) {
+					order.setHasFailedJobSteps(hasFailed);
+					RepositoryService.getOrderRepository().save(order);
+					em.merge(order);
+					hasChanged = true;
+				}
+				Boolean allHasFinished = true;
+				for (Job j : order.getJobs()) {
+					if (j.getJobState() != JobState.FAILED && j.getJobState() != JobState.COMPLETED) {
+						allHasFinished = false;
+						break;
+					}
+				}
+				if (allHasFinished) {
+					if (hasFailed) {
+						order.setOrderState(OrderState.FAILED);
+						RepositoryService.getOrderRepository().save(order);
+						em.merge(order);
+					} else {
+						order.setOrderState(OrderState.COMPLETED);
+						checkAutoClose(order);
+					}
+					hasChanged = true;
+				}
+			}
+			if (hasChanged) {
+				order.incrementVersion();
+				RepositoryService.getOrderRepository().save(order);
+				em.merge(order);
+				logOrderState(order);
+			}
 		}
  		return answer;
 	}
-		
+
+	/**
+	 * If the order is in systematic processing and the mission has an order retention period,
+	 * the order is automatically closed after completion and the eviction time is set.
+	 * 
+	 * @param order The processing order
+	 * @return true if closed
+	 */
+	@Transactional
+	public Boolean checkAutoClose(ProcessingOrder order) {
+		Duration retPeriod = order.getMission().getOrderRetentionPeriod();
+		if (retPeriod != null && order.getProductionType() == ProductionType.SYSTEMATIC) {
+			order.setEvictionTime(Instant.now().plus(retPeriod));
+			for (Job job : order.getJobs()) {
+				if (job.getJobState() == JobState.COMPLETED) {
+					jobUtil.close(job.getId());
+				}
+			}
+			if (order.getOrderState() == OrderState.COMPLETED) {
+				order.setOrderState(OrderState.CLOSED);
+			}
+			return true;
+		}
+		return false;
+	}
+	
 	/**
 	 * Get the processing facility(-ies) processing the order
 	 * At the moment there is normally only one facility to do so.
@@ -694,7 +1246,15 @@ public class OrderUtil {
 	 * @param order The processing order
 	 * @return List of processinig facilities
 	 */
-	public List<ProcessingFacility> getProcessingFacilities(ProcessingOrder order) {
+	@Transactional
+	public List<ProcessingFacility> getProcessingFacilities(long id) {
+		ProcessingOrder order = null;
+		Optional<ProcessingOrder> oOrder = RepositoryService.getOrderRepository().findById(id);
+		if (oOrder.isPresent()) {
+			order = oOrder.get();
+		}
+		if (logger.isTraceEnabled()) logger.trace(">>> getProcessingFacilities({})", (null == order ? "null" : order.getId()));
+		
 		List<ProcessingFacility> pfList = new ArrayList<ProcessingFacility>();
 		if (order != null) {
 			for (Job j : order.getJobs()) {
@@ -706,57 +1266,6 @@ public class OrderUtil {
 		return pfList;
 	}
 	
-	
-	/**
-	 * Update the order state depending on job state
-	 * TODO
-	 * 
-	 * @param order The processing order
-	 * @param jState The job state
-	 */
-
-	@Transactional
-	public void updateState(ProcessingOrder order, JobState jState) {
-		if (order != null) {
-			// INITIAL, APPROVED, PLANNED, RELEASED, RUNNING, SUSPENDING, COMPLETED, FAILED, CLOSED
-			switch (order.getOrderState()) {
-			case INITIAL:
-				break;
-			case APPROVED:
-				break;
-			case PLANNED:
-				if (jState == JobState.RELEASED) {
-					order.setOrderState(OrderState.RELEASED);
-					order.incrementVersion();
-					RepositoryService.getOrderRepository().save(order);
-					em.merge(order);
-				}	
-				break;
-			case RELEASED:
-				break;
-			case RUNNING:
-				break;
-			case SUSPENDING:
-				break;
-			case COMPLETED:
-				break;
-			case FAILED:
-				if (jState == JobState.INITIAL) {
-					order.setOrderState(OrderState.PLANNED);
-					order.incrementVersion();
-					RepositoryService.getOrderRepository().save(order);
-					em.merge(order);
-				}
-				break;
-			case CLOSED:
-				break;
-			default:
-				break;
-			}
-		}
-	}
-	
-
 	/**
 	 * Set the failed job steps flag in the order on failure
 	 * 
@@ -765,6 +1274,8 @@ public class OrderUtil {
 	 */
 	@Transactional
 	public void setHasFailedJobSteps(ProcessingOrder order, Boolean failed) {
+		if (logger.isTraceEnabled()) logger.trace(">>> setHasFailedJobSteps({}, {})", (null == order ? "null" : order.getId()), failed);
+		
 		if (failed && !order.getHasFailedJobSteps()) {
 			order.setHasFailedJobSteps(failed);
 			order.incrementVersion();
@@ -773,5 +1284,98 @@ public class OrderUtil {
 		}
 	}
 
+	public void logOrderState(ProcessingOrder order) {
+		// at the moment a dummy		
+	}
 
+
+	/**
+	 * Look for next order in state PLANNING, RELEASING and SUSPENDING to restart.
+	 */
+	public void checkNextForRestart() {
+		if (logger.isTraceEnabled()) logger.trace(">>> checkNextForRestart()");
+		long id = 0;
+		if (productionPlanner.getSuspendingOrders().size() > 0) {
+			id = (long)productionPlanner.getSuspendingOrders().get(0);
+			productionPlanner.getSuspendingOrders().remove(0);
+			if (logger.isTraceEnabled()) logger.trace(">>> suspend order ({})", id);
+			restartSuspendingOrder(id);
+			return;
+		}
+		if (productionPlanner.getReleasingOrders().size() > 0) {
+			id = (long)productionPlanner.getReleasingOrders().get(0);
+			productionPlanner.getReleasingOrders().remove(0);
+			if (logger.isTraceEnabled()) logger.trace(">>> release order ({})", id);
+			restartReleasingOrder(id);
+			return;
+		}
+		if (productionPlanner.getPlanningOrders().size() > 0) {
+			id = (long)productionPlanner.getPlanningOrders().get(0);
+			productionPlanner.getPlanningOrders().remove(0);
+			if (logger.isTraceEnabled()) logger.trace(">>> plan order ({})", id);
+			restartPlanningOrder(id);
+			return;
+		}
+	}
+
+	/**
+	 * restart the corresponding thread.
+	 */
+	@Transactional
+	private void restartPlanningOrder(long id) {
+		if (logger.isTraceEnabled()) logger.trace(">>> restartPlanningOrder({})", id);
+
+		TransactionTemplate transactionTemplate = new TransactionTemplate(productionPlanner.getTxManager());
+
+			// Find the processing facility
+			final ProcessingFacility pf = transactionTemplate.execute((status) -> {
+				Optional<ProcessingOrder> orderOpt = RepositoryService.getOrderRepository().findById(id);
+				if (orderOpt.isPresent()) {
+					Set<Job> jobs = orderOpt.get().getJobs();
+					for (Job job : jobs) {
+						if (job.getProcessingFacility() != null) {
+							return job.getProcessingFacility();
+						}
+					}
+				}
+				return null;
+			});
+			if (pf != null) {
+				UtilService.getOrderUtil().plan(id, pf, false);
+			} else {
+				// no job with processing facility exist, can't plan
+				final ProcessingOrder order = transactionTemplate.execute((status) -> {
+					Optional<ProcessingOrder> orderOpt = RepositoryService.getOrderRepository().findById(id);
+					if (orderOpt.isPresent()) {
+						return orderOpt.get();
+					}
+					return null;
+				});
+				if (order != null) {
+					UtilService.getOrderUtil().reset(order);
+				}
+			}
+	}
+
+	/**
+	 * restart the corresponding thread.
+	 */
+	public void restartReleasingOrder(long id) {
+		if (logger.isTraceEnabled()) logger.trace(">>> restartReleasingOrder({})", id);
+			
+		Optional<ProcessingOrder> order = RepositoryService.getOrderRepository().findById(id);
+		if (order.isPresent()) {
+			// resume the order
+			UtilService.getOrderUtil().resume(order.get(), false);
+		}
+	}
+
+	/**
+	 * restart the corresponding thread.
+	 */
+	public void restartSuspendingOrder(long id) {
+		if (logger.isTraceEnabled()) logger.trace(">>> restartSuspendingOrder({})", id);
+		
+		UtilService.getOrderUtil().suspend(id, true);
+	}
 }

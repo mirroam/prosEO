@@ -14,6 +14,7 @@ import javax.persistence.Enumerated;
 import javax.persistence.Index;
 import javax.persistence.Table;
 
+import de.dlr.proseo.model.enums.FacilityState;
 import de.dlr.proseo.model.enums.StorageType;
 
 /**
@@ -25,6 +26,9 @@ import de.dlr.proseo.model.enums.StorageType;
 @Entity
 @Table(indexes = { @Index(unique = true, columnList = "name") })
 public class ProcessingFacility extends PersistentObject {
+	
+	/* Message strings */
+	private static final String MSG_ILLEGAL_STATE_TRANSITION = "Illegal facility state transition from %s to %s";
 
 	/** The facility name (unique key) */
 	@Column(nullable = false)
@@ -33,21 +37,32 @@ public class ProcessingFacility extends PersistentObject {
 	/** A short description of the processing facility */
 	private String description;
 	
+	/** The run state the facility currently is in */
+	@Enumerated(EnumType.STRING)
+	private FacilityState facilityState;
+	
 	/** The URL to access this facility's processing engine (Kubernetes instance) */
 	private String processingEngineUrl;
 	
-	/** User name for connecting to this facility's processing engine (Kubernetes instance) */
-	private String processingEngineUser;
+	/** Authentication token for connecting to this facility's processing engine (Kubernetes instance) */
+	@org.hibernate.annotations.Type(type = "materialized_clob")
+	private String processingEngineToken;
 	
-	/** Password for connecting to this facility's processing engine (Kubernetes instance) */
-	private String processingEnginePassword;
+	/**
+	 * Maximum number of jobs, which may on average be scheduled per processing node on this processing facility
+	 * (on a Kubernetes cluster with n worker nodes the Production Planner will never schedule more than
+	 * n * maxJobsPerNode job steps).
+	 */
+	private Integer maxJobsPerNode = 1;
 	
-	/** The URL to access this facility's storage manager */
+	/** The URL to access this facility's storage manager from the control instance */
 	private String storageManagerUrl;
+	
+	/** The URL to access this facility's storage manager from an external client (via PRIP API) */
+	private String externalStorageManagerUrl;
 	
 	/**
 	 * URL of the locally accessible Storage Manager instance on a specific processing node (to be used by the Processing Engine).
-	 * This URL shall contain the string "%NODE_IP%", which will be replaced by the actual node IP of the Kubernetes worker node.
 	 */
 	private String localStorageManagerUrl;
 	
@@ -94,6 +109,28 @@ public class ProcessingFacility extends PersistentObject {
 	}
 
 	/**
+	 * Gets the run state of the processing facility
+	 * @return the facility state
+	 */
+	public FacilityState getFacilityState() {
+		return facilityState;
+	}
+
+	/**
+	 * Sets the run state of the processing facility
+	 * @param facilityState the facility state to set
+	 * @throws IllegalStateException if the intended facility state transition is illegal
+	 */
+	public void setFacilityState(FacilityState facilityState) throws IllegalStateException {
+		if (null == this.facilityState || this.facilityState.equals(facilityState) || this.facilityState.isLegalTransition(facilityState)) {
+			this.facilityState = facilityState;
+		} else {
+			throw new IllegalStateException(String.format(MSG_ILLEGAL_STATE_TRANSITION,
+					this.facilityState.toString(), facilityState.toString()));
+		}
+	}
+
+	/**
 	 * Gets the URL of the facility's processing engine (Kubernetes instance)
 	 * 
 	 * @return the URL of the processing engine
@@ -112,39 +149,39 @@ public class ProcessingFacility extends PersistentObject {
 	}
 
 	/**
-	 * Gets the user name for the processing engine
+	 * Gets the authentication token for the processing engine
 	 * 
-	 * @return the processing engine user
+	 * @return the processing engine token
 	 */
-	public String getProcessingEngineUser() {
-		return processingEngineUser;
+	public String getProcessingEngineToken() {
+		return processingEngineToken;
 	}
 
 	/**
-	 * Sets the user name for the processing engine
+	 * Sets the authentication token for the processing engine
 	 * 
-	 * @param processingEngineUser the processing engine user to set
+	 * @param processingEngineToken the processing engine token to set
 	 */
-	public void setProcessingEngineUser(String processingEngineUser) {
-		this.processingEngineUser = processingEngineUser;
+	public void setProcessingEngineToken(String processingEngineToken) {
+		this.processingEngineToken = processingEngineToken;
 	}
 
 	/**
-	 * Gets the password for the processing engine
+	 * Gets the maximum number of jobs schedulable per worker node
 	 * 
-	 * @return the processing engine password
+	 * @return the maximum number of jobs per node
 	 */
-	public String getProcessingEnginePassword() {
-		return processingEnginePassword;
+	public Integer getMaxJobsPerNode() {
+		return maxJobsPerNode;
 	}
 
 	/**
-	 * Sets the password for the processing engine
+	 * Sets the maximum number of jobs schedulable per worker node
 	 * 
-	 * @param processingEnginePassword the processing engine password to set
+	 * @param maxJobsPerNode the maximum number of jobs per node to set
 	 */
-	public void setProcessingEnginePassword(String processingEnginePassword) {
-		this.processingEnginePassword = processingEnginePassword;
+	public void setMaxJobsPerNode(Integer maxJobsPerNode) {
+		this.maxJobsPerNode = maxJobsPerNode;
 	}
 
 	/**
@@ -166,6 +203,26 @@ public class ProcessingFacility extends PersistentObject {
 	}
 
 	/**
+	 * Gets the URL of the facility's storage manager for external clients
+	 * 
+	 * @return the externalStorageManagerUrl
+	 */
+	public String getExternalStorageManagerUrl() {
+		return externalStorageManagerUrl;
+	}
+
+	/**
+	 * Sets the URL of the facility's storage manager for external clients
+	 * 
+	 * @param externalStorageManagerUrl the externalStorageManagerUrl to set
+	 */
+	public void setExternalStorageManagerUrl(String externalStorageManagerUrl) {
+		this.externalStorageManagerUrl = externalStorageManagerUrl;
+	}
+
+	/**
+	 * Gets the URL of the facility's storage manager for local worker nodes
+	 * 
 	 * @return the localStorageManagerUrl
 	 */
 	public String getLocalStorageManagerUrl() {
@@ -173,6 +230,8 @@ public class ProcessingFacility extends PersistentObject {
 	}
 
 	/**
+	 * Sets the URL of the facility's storage manager for local worker nodes
+	 * 
 	 * @param localStorageManagerUrl the localStorageManagerUrl to set
 	 */
 	public void setLocalStorageManagerUrl(String localStorageManagerUrl) {
@@ -235,14 +294,18 @@ public class ProcessingFacility extends PersistentObject {
 
 	@Override
 	public boolean equals(Object obj) {
+		// Object identity
 		if (this == obj)
 			return true;
-		if (!super.equals(obj))
-			return false;
+		
+		// Same database object
+		if (super.equals(obj))
+			return true;
+		
 		if (!(obj instanceof ProcessingFacility))
 			return false;
 		ProcessingFacility other = (ProcessingFacility) obj;
-		return Objects.equals(name, other.name);
+		return Objects.equals(name, other.getName());
 	}
 
 	@Override

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="Encoding">
+    <file url="file://$PROJECT_DIR$/api/prip/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/base-wrapper/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/common/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/facility-mgr/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/ingestor/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/model/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/order-mgr/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/planner/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/processor-mgr/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/productclass-mgr/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/samples/sample-processor/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/samples/sample-wrapper/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/storage-mgr/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/ui/backend/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/ui/cli/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/ui/gui/src/main/java" charset="UTF-8" />
+    <file url="file://$PROJECT_DIR$/user-mgr/src/main/java" charset="UTF-8" />
+  </component>
+</project>

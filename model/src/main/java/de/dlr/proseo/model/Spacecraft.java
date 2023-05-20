@@ -7,8 +7,10 @@ package de.dlr.proseo.model;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 import javax.persistence.CascadeType;
+import javax.persistence.ElementCollection;
 import javax.persistence.Entity;
 import javax.persistence.Index;
 import javax.persistence.ManyToOne;
@@ -23,14 +25,14 @@ import javax.persistence.Table;
  *
  */
 @Entity
-@Table(indexes = @Index(unique = true, columnList = "code"))
+@Table(indexes = @Index(unique = true, columnList = "mission_id, code"))
 public class Spacecraft extends PersistentObject {
 
 	/** The mission this spacecraft belongs to */
 	@ManyToOne
 	private Mission mission;
 	
-	/** The spacecraft code (e. g. S5P) */
+	/** The spacecraft code (e. g. S5P), unique within a mission */
 	private String code;
 	
 	/** The spacecraft name (e. g. Sentinel-5 Precursor) */
@@ -40,6 +42,10 @@ public class Spacecraft extends PersistentObject {
 	@OneToMany(mappedBy = "spacecraft", cascade = CascadeType.ALL, orphanRemoval = true)
 	@OrderBy("orbitNumber")
 	private List<Orbit> orbits = new ArrayList<>();
+	
+	/** The payloads flying on this spacecraft */
+	@ElementCollection
+	private List<Payload> payloads = new ArrayList<>();
 	
 	/**
 	 * Gets the mission of this spacecraft
@@ -108,6 +114,24 @@ public class Spacecraft extends PersistentObject {
 		this.orbits = orbits;
 	}
 
+	/**
+	 * Gets the list of payloads
+	 * 
+	 * @return the payloads
+	 */
+	public List<Payload> getPayloads() {
+		return payloads;
+	}
+
+	/**
+	 * Sets the list of payloads
+	 * 
+	 * @param payloads the payloads to set
+	 */
+	public void setPayloads(List<Payload> payloads) {
+		this.payloads = payloads;
+	}
+
 	@Override
 	public int hashCode() {
 		final int prime = 31;
@@ -119,24 +143,18 @@ public class Spacecraft extends PersistentObject {
 
 	@Override
 	public boolean equals(Object obj) {
+		// Object identity
 		if (this == obj)
 			return true;
-		if (!super.equals(obj))
-			return false;
+		
+		// Same database object
+		if (super.equals(obj))
+			return true;
+		
 		if (!(obj instanceof Spacecraft))
 			return false;
 		Spacecraft other = (Spacecraft) obj;
-		if (code == null) {
-			if (other.code != null)
-				return false;
-		} else if (!code.equals(other.code))
-			return false;
-		if (mission == null) {
-			if (other.mission != null)
-				return false;
-		} else if (!mission.equals(other.mission))
-			return false;
-		return true;
+		return Objects.equals(code, other.getCode()) && Objects.equals(mission, other.getMission());
 	}
 
 	@Override

@@ -1,7 +1,6 @@
 package de.dlr.proseo.facmgr.rest;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.ConcurrentModificationException;
 import java.util.List;
 import java.util.Optional;
@@ -12,145 +11,107 @@ import javax.persistence.NoResultException;
 import javax.persistence.PersistenceContext;
 import javax.persistence.Query;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 import de.dlr.proseo.facmgr.rest.model.FacmgrUtil;
 import de.dlr.proseo.facmgr.rest.model.RestProcessingFacility;
+import de.dlr.proseo.logging.logger.ProseoLogger;
+import de.dlr.proseo.logging.messages.FacilityMgrMessage;
+import de.dlr.proseo.logging.messages.GeneralMessage;
 import de.dlr.proseo.model.ProcessingFacility;
+import de.dlr.proseo.model.enums.FacilityState;
 import de.dlr.proseo.model.service.RepositoryService;
 
-
 /**
- * Service methods required to create, modify and delete processing facility in the prosEO database,
- * and to query the database about such facilities
+ * Service methods required to create, modify and delete processing facility in
+ * the prosEO database, and to query the database about such facilities
  * 
  * @author Ranjitha Vignesh
  */
 @Component
 @Transactional
 public class FacmgrManager {
-	/* Message ID constants */
-	private static final int MSG_ID_FACILITY_NOT_FOUND = 1014;
-	private static final int MSG_ID_DELETION_UNSUCCESSFUL = 1015;
-	//private static final int MSG_ID_NOT_IMPLEMENTED = 9000;
-	private static final int MSG_ID_FACILITY_MISSING = 1016;
-	private static final int MSG_ID_FACILITY_DELETED = 1017;
-	private static final int MSG_ID_FACILITY_RETRIEVED = 1018;
-	private static final int MSG_ID_FACILITY_MODIFIED = 1019;
-	private static final int MSG_ID_FACILITY_NOT_MODIFIED = 1020;
-	private static final int MSG_ID_FACILITY_CREATED = 1021;
-	private static final int MSG_ID_FACILITY_LIST_EMPTY = 1022;
-	private static final int MSG_ID_FACILITY_LIST_RETRIEVED = 1023;
-	private static final int MSG_ID_DUPLICATE_FACILITY = 1024;
-	private static final int MSG_ID_FACILITY_HAS_PRODUCTS = 1025;
-
-
-	/* Message string constants */
-	private static final String MSG_FACILITY_NOT_FOUND = "(E%d) No facility found for ID %d";
-	private static final String MSG_DELETION_UNSUCCESSFUL = "(E%d) Facility deletion unsuccessful for ID %d";
-	private static final String MSG_FACILITY_LIST_EMPTY = "(E%d) No facilities found for search criteria";
-	private static final String MSG_FACILITY_MISSING = "(E%d) Facility not set";
-	private static final String MSG_FACILITY_DELETED = "(I%d) Facility with id %d deleted";
-	private static final String MSG_FACILITY_ID_MISSING = "(E%d) Facility ID not set";
-	private static final String MSG_DUPLICATE_FACILITY = "(E%d) Facility %s exists already";
-	private static final String MSG_FACILITY_HAS_PRODUCTS = "(E%d) Cannot delete facility %s due to existing products";
-
-	private static final String MSG_FACILITY_RETRIEVED = "(I%d) Facility with ID %s retrieved";
-	private static final String MSG_FACILITY_NOT_MODIFIED = "(I%d) Facility with id %d not modified (no changes)";
-	private static final String MSG_FACILITY_MODIFIED = "(I%d) Facility with id %d modified";
-	private static final String MSG_FACILITY_CREATED = "(I%d) Facility with identifier %s created";
-	private static final String MSG_FACILITY_LIST_RETRIEVED = "(I%d) Facility list of size %d retrieved for facility '%s'";
 
 	/** JPA entity manager */
 	@PersistenceContext
 	private EntityManager em;
 
 	/** A logger for this class */
-	private static Logger logger = LoggerFactory.getLogger(FacmgrManager.class);
-	
-	/**
-	 * Create and log a formatted informational message
-	 * 
-	 * @param messageFormat the message text with parameter placeholder in String.format() style
-	 * @param messageId a (unique) message id
-	 * @param messageParameters the message parameters (optional, depending on the message format)
-	 * @return a formatted info message
-	 */
-	private String logInfo(String messageFormat, int messageId, Object... messageParameters) {
-		// Prepend message ID to parameter list
-		List<Object> messageParamList = new ArrayList<>(Arrays.asList(messageParameters));
-		messageParamList.add(0, messageId);
-		
-		// Log the error message
-		String message = String.format(messageFormat, messageParamList.toArray());
-		logger.info(message);
-		
-		return message;
-	}
-	/**
-	 * Create and log a formatted error message
-	 * 
-	 * @param messageFormat the message text with parameter placeholders in String.format() style
-	 * @param messageId a (unique) message id
-	 * @param messageParameters the message parameters (optional, depending on the message format)
-	 * @return a formatted error message
-	 */
-	private String logError(String messageFormat, int messageId, Object... messageParameters) {
-		// Prepend message ID to parameter list
-		List<Object> messageParamList = new ArrayList<>(Arrays.asList(messageParameters));
-		messageParamList.add(0, messageId);
-		
-		// Log the error message
-		String message = String.format(messageFormat, messageParamList.toArray());
-		logger.error(message);
-		
-		return message;
-	}
+	private static ProseoLogger logger = new ProseoLogger(FacmgrManager.class);
 
 	public RestProcessingFacility createFacility(RestProcessingFacility facility) throws IllegalArgumentException {
-		if (logger.isTraceEnabled()) logger.trace(">>> createFacility({})", (null == facility ? "MISSING" : facility.getName()));
-		
+		if (logger.isTraceEnabled())
+			logger.trace(">>> createFacility({})", (null == facility ? "MISSING" : facility.getName()));
+
 		if (null == facility) {
-			throw new IllegalArgumentException(logError(MSG_FACILITY_MISSING, MSG_ID_FACILITY_MISSING));
+			throw new IllegalArgumentException(logger.log(FacilityMgrMessage.FACILITY_MISSING));
 		}
-		
+
 		// Make sure the facility does not yet exist
 		ProcessingFacility modelFacility = RepositoryService.getFacilityRepository().findByName(facility.getName());
 		if (null != modelFacility) {
-			throw new IllegalArgumentException(logError(MSG_DUPLICATE_FACILITY, MSG_ID_DUPLICATE_FACILITY, facility.getName()));
+			throw new IllegalArgumentException(logger.log(FacilityMgrMessage.DUPLICATE_FACILITY, facility.getName()));
 		}
-		
+
 		modelFacility = FacmgrUtil.toModelFacility(facility);
-		
+
+		// Set default values where possible
+		if (null == modelFacility.getFacilityState()) {
+			modelFacility.setFacilityState(FacilityState.DISABLED);
+		}
+
+		// Ensure that mandatory attributes are set
+		if (null == modelFacility.getStorageManagerUrl() || modelFacility.getStorageManagerUrl().isBlank()) {
+			throw new IllegalArgumentException(logger.log(GeneralMessage.FIELD_NOT_SET, "StorageManagerUrl", "facility creation"));
+		}
+		if (null == modelFacility.getExternalStorageManagerUrl() || modelFacility.getExternalStorageManagerUrl().isBlank())
+			if (null == modelFacility.getStorageManagerUrl()) {
+				throw new IllegalArgumentException(
+						logger.log(GeneralMessage.FIELD_NOT_SET, "ExternalStorageManagerUrl", "facility creation"));
+			}
+		if (null == modelFacility.getStorageManagerUser() || modelFacility.getStorageManagerUser().isBlank()) {
+			throw new IllegalArgumentException(logger.log(GeneralMessage.FIELD_NOT_SET, "StorageManagerUser", "facility creation"));
+		}
+		if (null == modelFacility.getStorageManagerPassword()) {
+			throw new IllegalArgumentException(
+					logger.log(GeneralMessage.FIELD_NOT_SET, "StorageManagerPassword", "facility creation"));
+		}
+		if (null == modelFacility.getDefaultStorageType() || modelFacility.getStorageManagerPassword().isBlank()) {
+			throw new IllegalArgumentException(logger.log(GeneralMessage.FIELD_NOT_SET, "DefaultStorageType"));
+		}
+
 		modelFacility = RepositoryService.getFacilityRepository().save(modelFacility);
-		logInfo(MSG_FACILITY_CREATED, MSG_ID_FACILITY_CREATED, facility.getName());
+		logger.log(FacilityMgrMessage.FACILITY_CREATED, facility.getName());
 		return FacmgrUtil.toRestFacility(modelFacility);
 	}
+
 	/**
 	 * List of all facilities filtered by mission and name
 	 * 
 	 * @param name the name of the facility
 	 * @return a list of facilities
-	 * @throws NoResultException if no facilities matching the given search criteria could be found
+	 * @throws NoResultException if no facilities matching the given search criteria
+	 *                           could be found
 	 */
-	
+
 	public List<RestProcessingFacility> getFacility(String name) {
-		if (logger.isTraceEnabled()) logger.trace(">>> getFacilities({})", name);
+		if (logger.isTraceEnabled())
+			logger.trace(">>> getFacilities({})", name);
 		List<RestProcessingFacility> result = new ArrayList<>();
-		
+
 		if (null == name) {
 			// Simple case: no search criteria set
-			for (ProcessingFacility facility: RepositoryService.getFacilityRepository().findAll()) {
-				if (logger.isDebugEnabled()) logger.debug("Found facility with ID {}", facility.getId());
+			for (ProcessingFacility facility : RepositoryService.getFacilityRepository().findAll()) {
+				if (logger.isDebugEnabled())
+					logger.debug("Found facility with ID {}", facility.getId());
 				RestProcessingFacility resultFacility = FacmgrUtil.toRestFacility(facility);
-				if (logger.isDebugEnabled()) logger.debug("Created result facilities with ID {}", resultFacility.getId());
+				if (logger.isDebugEnabled())
+					logger.debug("Created result facilities with ID {}", resultFacility.getId());
 
 				result.add(resultFacility);
 			}
-		}else {
+		} else {
 			// Find using search parameters
 			String jpqlQuery = "select p from ProcessingFacility p where 1 = 1";
 			if (null != name) {
@@ -160,7 +121,7 @@ public class FacmgrManager {
 			if (null != name) {
 				query.setParameter("name", name);
 			}
-			for (Object resultObject: query.getResultList()) {
+			for (Object resultObject : query.getResultList()) {
 				if (resultObject instanceof ProcessingFacility) {
 					result.add(FacmgrUtil.toRestFacility((ProcessingFacility) resultObject));
 				}
@@ -168,187 +129,200 @@ public class FacmgrManager {
 
 		}
 		if (result.isEmpty()) {
-			throw new NoResultException(logError(MSG_FACILITY_LIST_EMPTY, MSG_ID_FACILITY_LIST_EMPTY));
-			
+			throw new NoResultException(logger.log(FacilityMgrMessage.FACILITY_LIST_EMPTY));
+
 		}
-		logInfo(MSG_FACILITY_LIST_RETRIEVED, MSG_ID_FACILITY_LIST_RETRIEVED, result.size(), name);
+		logger.log(FacilityMgrMessage.FACILITY_LIST_RETRIEVED, result.size(), name);
 
 		return result;
 	}
 
-	
 	/**
 	 * Find the facility with the given ID
 	 * 
 	 * @param id the ID to look for
 	 * @return a Json object corresponding to the facility found
 	 * @throws IllegalArgumentException if no facility ID was given
-	 * @throws NoResultException if no facility with the given ID exists
+	 * @throws NoResultException        if no facility with the given ID exists
 	 */
 	public RestProcessingFacility getFacilityById(Long id) throws IllegalArgumentException, NoResultException {
-		if (logger.isTraceEnabled()) logger.trace(">>> getFacilityById({})", id);
-		
+		if (logger.isTraceEnabled())
+			logger.trace(">>> getFacilityById({})", id);
+
 		if (null == id) {
-			throw new IllegalArgumentException(logError(MSG_FACILITY_ID_MISSING, MSG_ID_FACILITY_MISSING, id));
-		}	
+			throw new IllegalArgumentException(logger.log(FacilityMgrMessage.FACILITY_MISSING, id));
+		}
 		Optional<ProcessingFacility> modelFacility = RepositoryService.getFacilityRepository().findById(id);
-		
+
 		if (modelFacility.isEmpty()) {
-			throw new NoResultException(logError(MSG_FACILITY_NOT_FOUND, MSG_ID_FACILITY_NOT_FOUND, id));
-		}		
-		logInfo(MSG_FACILITY_RETRIEVED, MSG_ID_FACILITY_RETRIEVED, id);
-		
+			throw new NoResultException(logger.log(FacilityMgrMessage.FACILITY_NOT_FOUND, id));
+		}
+		logger.log(FacilityMgrMessage.FACILITY_RETRIEVED, id);
+
 		return FacmgrUtil.toRestFacility(modelFacility.get());
-		
+
 	}
-	
+
 	/**
-	 * Update the facility with the given ID with the attribute values of the given Json object. 	 * 
-	 * @param id the ID of the facility to update
-	 * @param restFacility a Json object containing the modified (and unmodified) attributes
-	 * @return a Json object corresponding to the facility after modification (with ID and version for all contained objects)
-	 * @throws EntityNotFoundException if no product with the given ID exists
-	 * @throws IllegalArgumentException if any of the input data was invalid
-	 * @throws ConcurrentModificationException if the facility has been modified since retrieval by the client
+	 * Update the facility with the given ID with the attribute values of the given
+	 * Json object. Unchanged values must be provided, too, or they will be changed
+	 * to null.
+	 * 
+	 * @param id           the ID of the facility to update
+	 * @param restFacility a Json object containing the modified (and unmodified)
+	 *                     attributes
+	 * @return a Json object corresponding to the facility after modification (with
+	 *         ID and version for all contained objects)
+	 * @throws EntityNotFoundException         if no product with the given ID
+	 *                                         exists
+	 * @throws IllegalArgumentException        if any of the input data was invalid
+	 * @throws ConcurrentModificationException if the facility has been modified
+	 *                                         since retrieval by the client
 	 */
 	public RestProcessingFacility modifyFacility(Long id, RestProcessingFacility restFacility) {
-		if (logger.isTraceEnabled()) logger.trace(">>> modifyFacility({})", id);
-		
+		if (logger.isTraceEnabled())
+			logger.trace(">>> modifyFacility({})", id);
+
 		if (null == id) {
-			throw new IllegalArgumentException(logError(MSG_FACILITY_ID_MISSING, MSG_ID_FACILITY_MISSING, id));
+			throw new IllegalArgumentException(logger.log(FacilityMgrMessage.FACILITY_MISSING, id));
 		}
-		
+
 		Optional<ProcessingFacility> optModelFacility = RepositoryService.getFacilityRepository().findById(id);
-				
+
 		if (optModelFacility.isEmpty()) {
-			throw new EntityNotFoundException(logError(MSG_FACILITY_NOT_FOUND, MSG_ID_FACILITY_NOT_FOUND, id));
+			throw new EntityNotFoundException(logger.log(FacilityMgrMessage.FACILITY_NOT_FOUND, id));
 		}
 		ProcessingFacility modelFacility = optModelFacility.get();
-		
+
+		// Check that mandatory attributes are set
+		if (null == modelFacility.getStorageManagerUrl() || modelFacility.getStorageManagerUrl().isBlank()) {
+			throw new IllegalArgumentException(logger.log(GeneralMessage.FIELD_NOT_SET, "StorageManagerUrl", "facility modifcation"));
+		}
+		if (null == modelFacility.getExternalStorageManagerUrl() || modelFacility.getExternalStorageManagerUrl().isBlank())
+			if (null == modelFacility.getStorageManagerUrl()) {
+				throw new IllegalArgumentException(
+						logger.log(GeneralMessage.FIELD_NOT_SET, "ExternalStorageManagerUrl", "facility modifcation"));
+			}
+		if (null == modelFacility.getStorageManagerUser() || modelFacility.getStorageManagerUser().isBlank()) {
+			throw new IllegalArgumentException(logger.log(GeneralMessage.FIELD_NOT_SET, "StorageManagerUser", "facility modifcation"));
+		}
+		if (null == modelFacility.getStorageManagerPassword()) {
+			throw new IllegalArgumentException(
+					logger.log(GeneralMessage.FIELD_NOT_SET, "StorageManagerPassword", "facility modifcation"));
+		}
+		if (null == modelFacility.getDefaultStorageType() || modelFacility.getStorageManagerPassword().isBlank()) {
+			throw new IllegalArgumentException(logger.log(GeneralMessage.FIELD_NOT_SET, "DefaultStorageType"));
+		}
+
 		// Update modified attributes
 		boolean facilityChanged = false;
 		ProcessingFacility changedFacility = FacmgrUtil.toModelFacility(restFacility);
-		
+
 		if (!modelFacility.getName().equals(changedFacility.getName())) {
 			facilityChanged = true;
 			modelFacility.setName(changedFacility.getName());
 		}
-		if (null == modelFacility.getDescription()) {
-			if (null == changedFacility.getDescription()) {
-				// No change
-			} else {
-				facilityChanged = true;
-				modelFacility.setDescription(changedFacility.getDescription());
-			}
-		} else if (!modelFacility.getDescription().equals(changedFacility.getDescription())) {
+		if (!modelFacility.getDescription().equals(changedFacility.getDescription())) {
 			facilityChanged = true;
 			modelFacility.setDescription(changedFacility.getDescription());
-		}	
-		if (null == modelFacility.getProcessingEngineUrl()) {
-			if (null == changedFacility.getProcessingEngineUrl()) {
-				// No change
-			} else {
-				facilityChanged = true;
-				modelFacility.setProcessingEngineUrl(changedFacility.getProcessingEngineUrl());
+		}
+		if (!modelFacility.getFacilityState().equals(changedFacility.getFacilityState())) {
+			facilityChanged = true;
+			try {
+				modelFacility.setFacilityState(changedFacility.getFacilityState());
+			} catch (IllegalStateException e) {
+				throw new IllegalArgumentException(logger.log(GeneralMessage.ILLEGAL_FACILITY_STATE_TRANSITION,
+						modelFacility.getFacilityState().toString(), changedFacility.getFacilityState().toString()));
 			}
-		} else if (!modelFacility.getProcessingEngineUrl().equals(changedFacility.getProcessingEngineUrl())) {
+		}
+		if (!modelFacility.getProcessingEngineUrl().equals(changedFacility.getProcessingEngineUrl())) {
 			facilityChanged = true;
 			modelFacility.setProcessingEngineUrl(changedFacility.getProcessingEngineUrl());
-		}	
-		if (null == modelFacility.getProcessingEngineUser()) {
-			if (null == changedFacility.getProcessingEngineUser()) {
-				// No change
-			} else {
-				facilityChanged = true;
-				modelFacility.setProcessingEngineUser(changedFacility.getProcessingEngineUser());
-			}
-		} else if (!modelFacility.getProcessingEngineUser().equals(changedFacility.getProcessingEngineUser())) {
+		}
+		if (!modelFacility.getProcessingEngineToken().equals(changedFacility.getProcessingEngineToken())) {
 			facilityChanged = true;
-			modelFacility.setProcessingEngineUser(changedFacility.getProcessingEngineUser());
-		}	
-		if (null == modelFacility.getProcessingEnginePassword()) {
-			if (null == changedFacility.getProcessingEnginePassword()) {
-				// No change
-			} else {
-				facilityChanged = true;
-				modelFacility.setProcessingEnginePassword(changedFacility.getProcessingEnginePassword());
-			}
-		} else if (!modelFacility.getProcessingEnginePassword().equals(changedFacility.getProcessingEnginePassword())) {
+			modelFacility.setProcessingEngineToken(changedFacility.getProcessingEngineToken());
+		}
+		if (!modelFacility.getMaxJobsPerNode().equals(changedFacility.getMaxJobsPerNode())) {
 			facilityChanged = true;
-			modelFacility.setProcessingEnginePassword(changedFacility.getProcessingEnginePassword());
-		}	
+			modelFacility.setMaxJobsPerNode(changedFacility.getMaxJobsPerNode());
+		}
 		if (!modelFacility.getStorageManagerUrl().equals(changedFacility.getStorageManagerUrl())) {
 			facilityChanged = true;
 			modelFacility.setStorageManagerUrl(changedFacility.getStorageManagerUrl());
-		}	
-		if (null == modelFacility.getLocalStorageManagerUrl()) {
-			if (null == changedFacility.getLocalStorageManagerUrl()) {
-				// No change
-			} else {
-				facilityChanged = true;
-				modelFacility.setLocalStorageManagerUrl(changedFacility.getLocalStorageManagerUrl());
-			}
-		} else if (!modelFacility.getLocalStorageManagerUrl().equals(changedFacility.getLocalStorageManagerUrl())) {
+		}
+		if (!modelFacility.getExternalStorageManagerUrl().equals(changedFacility.getExternalStorageManagerUrl())) {
+			facilityChanged = true;
+			modelFacility.setExternalStorageManagerUrl(changedFacility.getExternalStorageManagerUrl());
+		}
+		if (!modelFacility.getLocalStorageManagerUrl().equals(changedFacility.getLocalStorageManagerUrl())) {
 			facilityChanged = true;
 			modelFacility.setLocalStorageManagerUrl(changedFacility.getLocalStorageManagerUrl());
-		}	
+		}
 		if (!modelFacility.getStorageManagerUser().equals(changedFacility.getStorageManagerUser())) {
 			facilityChanged = true;
 			modelFacility.setStorageManagerUser(changedFacility.getStorageManagerUser());
-		}	
+		}
 		if (!modelFacility.getStorageManagerPassword().equals(changedFacility.getStorageManagerPassword())) {
 			facilityChanged = true;
 			modelFacility.setStorageManagerPassword(changedFacility.getStorageManagerPassword());
-		}	
+		}
 		if (!modelFacility.getDefaultStorageType().equals(changedFacility.getDefaultStorageType())) {
 			facilityChanged = true;
 			modelFacility.setDefaultStorageType(changedFacility.getDefaultStorageType());
-		}	
+		}
+		
 		// Save order only if anything was actually changed
-		if (facilityChanged)	{
+		if (facilityChanged) {
 			modelFacility.incrementVersion();
 			modelFacility = RepositoryService.getFacilityRepository().save(modelFacility);
-			logInfo(MSG_FACILITY_MODIFIED, MSG_ID_FACILITY_MODIFIED, id);
+			logger.log(FacilityMgrMessage.FACILITY_MODIFIED, id);
 		} else {
-			logInfo(MSG_FACILITY_NOT_MODIFIED, MSG_ID_FACILITY_NOT_MODIFIED, id);
+			logger.log(FacilityMgrMessage.FACILITY_NOT_MODIFIED, id);
 		}
 		return FacmgrUtil.toRestFacility(modelFacility);
 	}
-	
+
 	/**
 	 * Delete an facility by ID
 	 * 
 	 * @param id the ID of the facility to delete
-	 * @throws EntityNotFoundException if the facility to delete does not exist in the database
-	 * @throws IllegalArgumentException if the facility to delete still has stored products
-	 * @throws RuntimeException if the deletion was not performed as expected
+	 * @throws EntityNotFoundException  if the facility to delete does not exist in
+	 *                                  the database
+	 * @throws IllegalArgumentException if the facility to delete still has stored
+	 *                                  products
+	 * @throws RuntimeException         if the deletion was not performed as
+	 *                                  expected
 	 */
 	public void deleteFacilityById(Long id) throws EntityNotFoundException, IllegalArgumentException, RuntimeException {
-		if (logger.isTraceEnabled()) logger.trace(">>> deleteFacilityById({})", id);
+		if (logger.isTraceEnabled())
+			logger.trace(">>> deleteFacilityById({})", id);
 
 		// Test whether the facility id is valid
 		Optional<ProcessingFacility> modelFacility = RepositoryService.getFacilityRepository().findById(id);
 		if (modelFacility.isEmpty()) {
-			throw new EntityNotFoundException(logError(MSG_FACILITY_NOT_FOUND, MSG_ID_FACILITY_NOT_FOUND));
+			throw new EntityNotFoundException(logger.log(FacilityMgrMessage.FACILITY_NOT_FOUND));
 		}
-		
+
 		// Test whether the facility still has stored products
-		if (!RepositoryService.getProductFileRepository().findByProcessingFacilityId(modelFacility.get().getId()).isEmpty()) {
+		if (!RepositoryService.getProductFileRepository().findByProcessingFacilityId(modelFacility.get().getId())
+				.isEmpty()) {
 			throw new IllegalArgumentException(
-					logError(MSG_FACILITY_HAS_PRODUCTS, MSG_ID_FACILITY_HAS_PRODUCTS, modelFacility.get().getName()));
-		};
-		
+					logger.log(FacilityMgrMessage.FACILITY_HAS_PRODUCTS, modelFacility.get().getName()));
+		}
+		;
+
 		// Delete the facility
 		RepositoryService.getFacilityRepository().deleteById(id);
 
 		// Test whether the deletion was successful
 		modelFacility = RepositoryService.getFacilityRepository().findById(id);
 		if (!modelFacility.isEmpty()) {
-			throw new RuntimeException(logError(MSG_DELETION_UNSUCCESSFUL, MSG_ID_DELETION_UNSUCCESSFUL, id));
+			throw new RuntimeException(logger.log(FacilityMgrMessage.DELETION_UNSUCCESSFUL, id));
 		}
-		
-		logInfo(MSG_FACILITY_DELETED, MSG_ID_FACILITY_DELETED, id);
-		
+
+		logger.log(FacilityMgrMessage.FACILITY_DELETED, id);
+
 	}
-	
+
 }

@@ -63,10 +63,19 @@ resourceTypes:
 /productclasses:
   type: standard
   get:
-    description: Get product classes, optionally filtered by mission and/or product type
+    description: Get product classes, optionally filtered by mission, product type, processor class, processing level or visibility
+    displayName: getRestProductClass
     queryParameters:
       mission?: string
-      productType?: string
+      productType?: string[]
+      processorClass?: string[]
+      level?: string
+      visibility?: string
+      recordFrom?: integer
+      recordTo?: integer
+      orderBy?:
+        type: string[]
+        description: an array of strings containing a column name and an optional sort direction (ASC/DESC), separated by white space
     responses:
       200:
         body:
@@ -85,6 +94,32 @@ resourceTypes:
           application/json:
             type: RestProductClass
             example: !include ../../../../../model/src/main/resources/raml/examples/productclass.json
+  /count:
+    get:
+      description: Number of product classes available
+      displayName: countProductClasses
+      queryParameters:
+        mission?: string
+        productType?: string[]
+        processorClass?: string[]
+        level?: string
+        visibility?: string
+      responses:
+        200:
+          body:
+            text/plain:
+  /names:
+    get:
+      description: List of product class names
+      displayName: getProductClassNames
+      queryParameters:
+        mission?: string
+        productType?: string
+      responses:
+        200:
+          body:
+            application/json:
+              type: string[]
   /{id}:
     uriParameters:
       id:

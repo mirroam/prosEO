@@ -6,7 +6,6 @@
 package de.dlr.proseo.procmgr.rest;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.ConcurrentModificationException;
 import java.util.List;
 import java.util.Optional;
@@ -19,15 +18,17 @@ import javax.persistence.PersistenceContext;
 import javax.persistence.Query;
 import javax.validation.Valid;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
+import de.dlr.proseo.logging.logger.ProseoLogger;
+import de.dlr.proseo.logging.messages.GeneralMessage;
+import de.dlr.proseo.logging.messages.ProcessorMgrMessage;
 import de.dlr.proseo.model.Configuration;
 import de.dlr.proseo.model.ConfiguredProcessor;
 import de.dlr.proseo.model.Processor;
+import de.dlr.proseo.model.ProcessorClass;
 import de.dlr.proseo.model.service.RepositoryService;
 import de.dlr.proseo.model.service.SecurityService;
 import de.dlr.proseo.procmgr.rest.model.ConfiguredProcessorUtil;
@@ -42,53 +43,7 @@ import de.dlr.proseo.procmgr.rest.model.RestConfiguredProcessor;
 @Component
 @Transactional
 public class ConfiguredProcessorManager {
-	
-	/* Message ID constants */
-	private static final int MSG_ID_CONFIGURED_PROCESSOR_NOT_FOUND = 2350;
-	private static final int MSG_ID_CONFIGURED_PROCESSOR_LIST_RETRIEVED = 2351;
-	private static final int MSG_ID_CONFIGURED_PROCESSOR_RETRIEVED = 2352;
-	private static final int MSG_ID_CONFIGURED_PROCESSOR_MISSING = 2353;
-	private static final int MSG_ID_PROCESSOR_INVALID = 2354;
-	private static final int MSG_ID_CONFIGURED_PROCESSOR_CREATED = 2355;
-	private static final int MSG_ID_CONFIGURED_PROCESSOR_ID_MISSING = 2356;
-	private static final int MSG_ID_CONFIGURED_PROCESSOR_ID_NOT_FOUND = 2357;
-	private static final int MSG_ID_CONFIGURATION_INVALID = 2358;
-	private static final int MSG_ID_CONFIGURED_PROCESSOR_MODIFIED = 2359;
-	private static final int MSG_ID_CONFIGURED_PROCESSOR_NOT_MODIFIED = 2360;
-	private static final int MSG_ID_CONFIGURED_PROCESSOR_DELETED = 2361;
-	private static final int MSG_ID_DELETION_UNSUCCESSFUL = 2362;
-	private static final int MSG_ID_CONCURRENT_UPDATE = 2363;
-	private static final int MSG_ID_DUPLICATE_CONFPROC_UUID = 2364;
-	private static final int MSG_ID_DUPLICATE_CONFPROC_ID = 2365;
-	private static final int MSG_ID_CONFIGURED_PROCESSOR_DATA_MISSING = 2366;
-	
-	// Same as in other services
-	private static final int MSG_ID_ILLEGAL_CROSS_MISSION_ACCESS = 2028;
-	//private static final int MSG_ID_NOT_IMPLEMENTED = 9000;
-	
-	/* Message string constants */
-	private static final String MSG_CONFIGURED_PROCESSOR_NOT_FOUND = "(E%d) No configured processors found for mission %s, identifier %s, processor name %s, processor version %s and configuration version %s";
-	private static final String MSG_CONFIGURED_PROCESSOR_MISSING = "(E%d) Configuration not set";
-	private static final String MSG_CONFIGURED_PROCESSOR_ID_MISSING = "(E%d) Configuration ID not set";
-	private static final String MSG_CONFIGURED_PROCESSOR_ID_NOT_FOUND = "(E%d) No Configuration found with ID %d";
-	private static final String MSG_PROCESSOR_INVALID = "(E%d) Processor %s with version %s invalid for mission %s";
-	private static final String MSG_CONFIGURATION_INVALID = "(E%d) Configuration %s with version %s invalid for mission %s";
-	private static final String MSG_DELETION_UNSUCCESSFUL = "(E%d) Deletion of configured processor unsuccessful for ID %d";
-	private static final String MSG_CONCURRENT_UPDATE = "(E%d) The configured processor with ID %d has been modified since retrieval by the client";
-	private static final String MSG_DUPLICATE_CONFPROC_UUID = "(E%d) Duplicate configured processor UUID %s";
-	private static final String MSG_DUPLICATE_CONFPROC_ID = "(E%d) Duplicate configured processor identifier %s";
-	private static final String MSG_CONFIGURED_PROCESSOR_DATA_MISSING = "(E%d) Data for configured processor not set";
 
-	private static final String MSG_CONFIGURED_PROCESSOR_LIST_RETRIEVED = "(I%d) Configuration(s) for mission %s, identifier %s, processor name %s, processor version %s and configuration version %s retrieved";
-	private static final String MSG_CONFIGURED_PROCESSOR_RETRIEVED = "(I%d) Configuration with ID %d retrieved";
-	private static final String MSG_CONFIGURED_PROCESSOR_CREATED = "(I%d) Configuration for processor %s with version %s created for mission %s";
-	private static final String MSG_CONFIGURED_PROCESSOR_MODIFIED = "(I%d) Configured processor with id %d modified";
-	private static final String MSG_CONFIGURED_PROCESSOR_NOT_MODIFIED = "(I%d) Configured processor with id %d not modified (no changes)";
-	private static final String MSG_CONFIGURED_PROCESSOR_DELETED = "(I%d) Configured processor with id %d deleted";
-
-	// Same as in other services
-	private static final String MSG_ILLEGAL_CROSS_MISSION_ACCESS = "(E%d) Illegal cross-mission access to mission %s (logged in to %s)";
-	
 	/** Utility class for user authorizations */
 	@Autowired
 	private SecurityService securityService;
@@ -98,47 +53,7 @@ public class ConfiguredProcessorManager {
 	private EntityManager em;
 
 	/** A logger for this class */
-	private static Logger logger = LoggerFactory.getLogger(ConfiguredProcessorManager.class);
-
-	/**
-	 * Create and log a formatted informational message
-	 * 
-	 * @param messageFormat the message text with parameter placeholders in String.format() style
-	 * @param messageId a (unique) message id
-	 * @param messageParameters the message parameters (optional, depending on the message format)
-	 * @return a formatted info mesage
-	 */
-	private String logInfo(String messageFormat, int messageId, Object... messageParameters) {
-		// Prepend message ID to parameter list
-		List<Object> messageParamList = new ArrayList<>(Arrays.asList(messageParameters));
-		messageParamList.add(0, messageId);
-		
-		// Log the error message
-		String message = String.format(messageFormat, messageParamList.toArray());
-		logger.info(message);
-		
-		return message;
-	}
-	
-	/**
-	 * Create and log a formatted error message
-	 * 
-	 * @param messageFormat the message text with parameter placeholders in String.format() style
-	 * @param messageId a (unique) message id
-	 * @param messageParameters the message parameters (optional, depending on the message format)
-	 * @return a formatted error message
-	 */
-	private String logError(String messageFormat, int messageId, Object... messageParameters) {
-		// Prepend message ID to parameter list
-		List<Object> messageParamList = new ArrayList<>(Arrays.asList(messageParameters));
-		messageParamList.add(0, messageId);
-		
-		// Log the error message
-		String message = String.format(messageFormat, messageParamList.toArray());
-		logger.error(message);
-		
-		return message;
-	}
+	private static ProseoLogger logger = new ProseoLogger(ConfiguredProcessorManager.class);
 	
 	/**
 	 * Get configured processors, filtered by mission, identifier, processor name, processor version and/or configuration version
@@ -164,7 +79,7 @@ public class ConfiguredProcessorManager {
 		} else {
 			// Ensure user is authorized for the requested mission
 			if (!securityService.isAuthorizedForMission(mission)) {
-				throw new SecurityException(logError(MSG_ILLEGAL_CROSS_MISSION_ACCESS, MSG_ID_ILLEGAL_CROSS_MISSION_ACCESS,
+				throw new SecurityException(logger.log(GeneralMessage.ILLEGAL_CROSS_MISSION_ACCESS,
 						mission, securityService.getMission()));
 			} 
 		}
@@ -210,11 +125,11 @@ public class ConfiguredProcessorManager {
 			}
 		}
 		if (result.isEmpty()) {
-			throw new NoResultException(logError(MSG_CONFIGURED_PROCESSOR_NOT_FOUND, MSG_ID_CONFIGURED_PROCESSOR_NOT_FOUND,
+			throw new NoResultException(logger.log(ProcessorMgrMessage.CONFIGURED_PROCESSOR_NOT_FOUND,
 					mission, identifier, processorName, processorVersion, configurationVersion));
 		}
 
-		logInfo(MSG_CONFIGURED_PROCESSOR_LIST_RETRIEVED, MSG_ID_CONFIGURED_PROCESSOR_LIST_RETRIEVED,
+		logger.log(ProcessorMgrMessage.CONFIGURED_PROCESSOR_LIST_RETRIEVED,
 				mission, identifier, processorName, processorVersion, configurationVersion);
 		
 		return result;
@@ -234,13 +149,27 @@ public class ConfiguredProcessorManager {
 				(null == configuredProcessor ? "MISSING" : configuredProcessor.getProcessorName()));
 
 		if (null == configuredProcessor) {
-			throw new IllegalArgumentException(logError(MSG_CONFIGURED_PROCESSOR_MISSING, MSG_ID_CONFIGURED_PROCESSOR_MISSING));
+			throw new IllegalArgumentException(logger.log(ProcessorMgrMessage.CONFIGURED_PROCESSOR_MISSING));
 		}
 		
 		// Ensure user is authorized for the mission of the configured processor
 		if (!securityService.isAuthorizedForMission(configuredProcessor.getMissionCode())) {
-			throw new SecurityException(logError(MSG_ILLEGAL_CROSS_MISSION_ACCESS, MSG_ID_ILLEGAL_CROSS_MISSION_ACCESS,
+			throw new SecurityException(logger.log(GeneralMessage.ILLEGAL_CROSS_MISSION_ACCESS,
 					configuredProcessor.getMissionCode(), securityService.getMission()));			
+		}
+		
+		// Ensure mandatory attributes are set
+		if (null == configuredProcessor.getIdentifier() || configuredProcessor.getIdentifier().isBlank()) {
+			throw new IllegalArgumentException(logger.log(GeneralMessage.FIELD_NOT_SET, "identifier", "configuredProcessor creation"));
+		}
+		if (null == configuredProcessor.getProcessorName() || configuredProcessor.getProcessorName().isBlank()) {
+			throw new IllegalArgumentException(logger.log(GeneralMessage.FIELD_NOT_SET, "processorName", "configuredProcessor creation"));
+		}
+		if (null == configuredProcessor.getProcessorVersion() || configuredProcessor.getProcessorVersion().isBlank()) {
+			throw new IllegalArgumentException(logger.log(GeneralMessage.FIELD_NOT_SET, "processorVersion", "configuredProcessor creation"));
+		}
+		if (null == configuredProcessor.getConfigurationVersion() || configuredProcessor.getConfigurationVersion().isBlank()) {
+			throw new IllegalArgumentException(logger.log(GeneralMessage.FIELD_NOT_SET, "configurationVersion", "configuredProcessor creation"));
 		}
 		
 		ConfiguredProcessor modelConfiguredProcessor = ConfiguredProcessorUtil.toModelConfiguredProcessor(configuredProcessor);
@@ -250,14 +179,15 @@ public class ConfiguredProcessorManager {
 		} else {
 			// Test if given UUID is not yet in use
 			if (null != RepositoryService.getConfiguredProcessorRepository().findByUuid(modelConfiguredProcessor.getUuid())) {
-				throw new IllegalArgumentException(logError(MSG_DUPLICATE_CONFPROC_UUID, MSG_ID_DUPLICATE_CONFPROC_UUID, 
+				throw new IllegalArgumentException(logger.log(ProcessorMgrMessage.DUPLICATE_CONFPROC_UUID, 
 						modelConfiguredProcessor.getUuid()));
 			}
 		}
 		
 		// Make sure a configured processor with the same identifier does not yet exist for the mission
-		if (null != RepositoryService.getConfiguredProcessorRepository().findByIdentifier(configuredProcessor.getIdentifier())) {
-			throw new IllegalArgumentException(logError(MSG_DUPLICATE_CONFPROC_ID, MSG_ID_DUPLICATE_CONFPROC_ID,
+		if (null != RepositoryService.getConfiguredProcessorRepository()
+				.findByMissionCodeAndIdentifier(configuredProcessor.getMissionCode(), configuredProcessor.getIdentifier())) {
+			throw new IllegalArgumentException(logger.log(ProcessorMgrMessage.DUPLICATE_CONFPROC_ID,
 					configuredProcessor.getIdentifier()));
 		}
 
@@ -267,7 +197,7 @@ public class ConfiguredProcessorManager {
 						configuredProcessor.getProcessorName(),
 						configuredProcessor.getProcessorVersion()));
 		if (null == modelConfiguredProcessor.getProcessor()) {
-			throw new IllegalArgumentException(logError(MSG_PROCESSOR_INVALID, MSG_ID_PROCESSOR_INVALID,
+			throw new IllegalArgumentException(logger.log(ProcessorMgrMessage.PROCESSOR_INVALID,
 					configuredProcessor.getProcessorName(),
 					configuredProcessor.getProcessorVersion(),
 					configuredProcessor.getMissionCode()));
@@ -279,7 +209,7 @@ public class ConfiguredProcessorManager {
 						configuredProcessor.getProcessorName(),
 						configuredProcessor.getConfigurationVersion()));
 		if (null == modelConfiguredProcessor.getConfiguration()) {
-			throw new IllegalArgumentException(logError(MSG_CONFIGURATION_INVALID, MSG_ID_CONFIGURATION_INVALID,
+			throw new IllegalArgumentException(logger.log(ProcessorMgrMessage.CONFIGURATION_INVALID,
 					configuredProcessor.getProcessorName(),
 					configuredProcessor.getConfigurationVersion(),
 					configuredProcessor.getMissionCode()));
@@ -287,7 +217,7 @@ public class ConfiguredProcessorManager {
 		
 		modelConfiguredProcessor = RepositoryService.getConfiguredProcessorRepository().save(modelConfiguredProcessor);
 		
-		logInfo(MSG_CONFIGURED_PROCESSOR_CREATED, MSG_ID_CONFIGURED_PROCESSOR_CREATED, 
+		logger.log(ProcessorMgrMessage.CONFIGURED_PROCESSOR_CREATED, 
 				modelConfiguredProcessor.getProcessor().getProcessorClass().getProcessorName(),
 				modelConfiguredProcessor.getProcessor().getProcessorVersion(),
 				modelConfiguredProcessor.getConfiguration().getConfigurationVersion(), 
@@ -310,22 +240,22 @@ public class ConfiguredProcessorManager {
 		if (logger.isTraceEnabled()) logger.trace(">>> getConfiguredProcessorById({})", id);
 		
 		if (null == id) {
-			throw new IllegalArgumentException(logError(MSG_CONFIGURED_PROCESSOR_ID_MISSING, MSG_ID_CONFIGURED_PROCESSOR_ID_MISSING, id));
+			throw new IllegalArgumentException(logger.log(ProcessorMgrMessage.CONFIGURED_PROCESSOR_ID_MISSING, id));
 		}
 		
 		Optional<de.dlr.proseo.model.ConfiguredProcessor> modelConfiguredProcessor = RepositoryService.getConfiguredProcessorRepository().findById(id);
 		
 		if (modelConfiguredProcessor.isEmpty()) {
-			throw new NoResultException(logError(MSG_CONFIGURED_PROCESSOR_ID_NOT_FOUND, MSG_ID_CONFIGURED_PROCESSOR_ID_NOT_FOUND, id));
+			throw new NoResultException(logger.log(ProcessorMgrMessage.CONFIGURED_PROCESSOR_ID_NOT_FOUND, id));
 		}
 
 		// Ensure user is authorized for the mission of the configured processor
 		if (!securityService.isAuthorizedForMission(modelConfiguredProcessor.get().getProcessor().getProcessorClass().getMission().getCode())) {
-			throw new SecurityException(logError(MSG_ILLEGAL_CROSS_MISSION_ACCESS, MSG_ID_ILLEGAL_CROSS_MISSION_ACCESS,
+			throw new SecurityException(logger.log(GeneralMessage.ILLEGAL_CROSS_MISSION_ACCESS,
 					modelConfiguredProcessor.get().getProcessor().getProcessorClass().getMission().getCode(), securityService.getMission()));			
 		}
 		
-		logInfo(MSG_CONFIGURED_PROCESSOR_RETRIEVED, MSG_ID_CONFIGURED_PROCESSOR_RETRIEVED, id);
+		logger.log(ProcessorMgrMessage.CONFIGURED_PROCESSOR_RETRIEVED, id);
 		
 		return ConfiguredProcessorUtil.toRestConfiguredProcessor(modelConfiguredProcessor.get());
 	}
@@ -348,28 +278,42 @@ public class ConfiguredProcessorManager {
 
 		// Check arguments
 		if (null == id) {
-			throw new IllegalArgumentException(logError(MSG_CONFIGURED_PROCESSOR_ID_MISSING, MSG_ID_CONFIGURED_PROCESSOR_ID_MISSING, id));
+			throw new IllegalArgumentException(logger.log(ProcessorMgrMessage.CONFIGURED_PROCESSOR_ID_MISSING, id));
 		}
 		if (null == configuredProcessor) {
-			throw new IllegalArgumentException(logError(MSG_CONFIGURED_PROCESSOR_DATA_MISSING, MSG_ID_CONFIGURED_PROCESSOR_DATA_MISSING));
+			throw new IllegalArgumentException(logger.log(ProcessorMgrMessage.CONFIGURED_PROCESSOR_DATA_MISSING));
 		}
 		
 		// Ensure user is authorized for the mission of the configured processor
 		if (!securityService.isAuthorizedForMission(configuredProcessor.getMissionCode())) {
-			throw new SecurityException(logError(MSG_ILLEGAL_CROSS_MISSION_ACCESS, MSG_ID_ILLEGAL_CROSS_MISSION_ACCESS,
+			throw new SecurityException(logger.log(GeneralMessage.ILLEGAL_CROSS_MISSION_ACCESS,
 					configuredProcessor.getMissionCode(), securityService.getMission()));			
 		}
 		
 		Optional<de.dlr.proseo.model.ConfiguredProcessor> optConfiguredProcessor = RepositoryService.getConfiguredProcessorRepository().findById(id);
 		
 		if (optConfiguredProcessor.isEmpty()) {
-			throw new NoResultException(logError(MSG_CONFIGURED_PROCESSOR_ID_NOT_FOUND, MSG_ID_CONFIGURED_PROCESSOR_ID_NOT_FOUND, id));
+			throw new NoResultException(logger.log(ProcessorMgrMessage.CONFIGURED_PROCESSOR_ID_NOT_FOUND, id));
 		}
 		ConfiguredProcessor modelConfiguredProcessor = optConfiguredProcessor.get();
+				
+		// Ensure mandatory attributes are set
+		if (null == configuredProcessor.getIdentifier() || configuredProcessor.getIdentifier().isBlank()) {
+			throw new IllegalArgumentException(logger.log(GeneralMessage.FIELD_NOT_SET, "identifier", "configuredProcessor modification"));
+		}
+		if (null == configuredProcessor.getProcessorName() || configuredProcessor.getProcessorName().isBlank()) {
+			throw new IllegalArgumentException(logger.log(GeneralMessage.FIELD_NOT_SET, "processorName", "configuredProcessor modification"));
+		}
+		if (null == configuredProcessor.getProcessorVersion() || configuredProcessor.getProcessorVersion().isBlank()) {
+			throw new IllegalArgumentException(logger.log(GeneralMessage.FIELD_NOT_SET, "processorVersion", "configuredProcessor modification"));
+		}
+		if (null == configuredProcessor.getConfigurationVersion() || configuredProcessor.getConfigurationVersion().isBlank()) {
+			throw new IllegalArgumentException(logger.log(GeneralMessage.FIELD_NOT_SET, "configurationVersion", "configuredProcessor modification"));
+		}
 		
 		// Make sure we are allowed to change the configured processor (no intermediate update)
 		if (modelConfiguredProcessor.getVersion() != configuredProcessor.getVersion().intValue()) {
-			throw new ConcurrentModificationException(logError(MSG_CONCURRENT_UPDATE, MSG_ID_CONCURRENT_UPDATE, id));
+			throw new ConcurrentModificationException(logger.log(ProcessorMgrMessage.CONCURRENT_UPDATE, id));
 		}
 		
 		// Apply changed attributes
@@ -391,7 +335,7 @@ public class ConfiguredProcessorManager {
 						configuredProcessor.getProcessorName(),
 						configuredProcessor.getProcessorVersion());
 		if (null == changedProcessor) {
-			throw new IllegalArgumentException(logError(MSG_PROCESSOR_INVALID, MSG_ID_PROCESSOR_INVALID,
+			throw new IllegalArgumentException(logger.log(ProcessorMgrMessage.PROCESSOR_INVALID,
 					configuredProcessor.getProcessorName(),
 					configuredProcessor.getProcessorVersion(),
 					configuredProcessor.getMissionCode()));
@@ -409,7 +353,7 @@ public class ConfiguredProcessorManager {
 						configuredProcessor.getProcessorName(),
 						configuredProcessor.getConfigurationVersion());
 		if (null == changedConfiguration) {
-			throw new IllegalArgumentException(logError(MSG_CONFIGURATION_INVALID, MSG_ID_CONFIGURATION_INVALID,
+			throw new IllegalArgumentException(logger.log(ProcessorMgrMessage.CONFIGURATION_INVALID,
 					configuredProcessor.getProcessorName(),
 					configuredProcessor.getProcessorVersion(),
 					configuredProcessor.getMissionCode()));
@@ -425,9 +369,9 @@ public class ConfiguredProcessorManager {
 		if (configuredProcessorChanged) {
 			modelConfiguredProcessor.incrementVersion();
 			modelConfiguredProcessor = RepositoryService.getConfiguredProcessorRepository().save(modelConfiguredProcessor);
-			logInfo(MSG_CONFIGURED_PROCESSOR_MODIFIED, MSG_ID_CONFIGURED_PROCESSOR_MODIFIED, id);
+			logger.log(ProcessorMgrMessage.CONFIGURED_PROCESSOR_MODIFIED, id);
 		} else {
-			logInfo(MSG_CONFIGURED_PROCESSOR_NOT_MODIFIED, MSG_ID_CONFIGURED_PROCESSOR_NOT_MODIFIED, id);
+			logger.log(ProcessorMgrMessage.CONFIGURED_PROCESSOR_NOT_MODIFIED, id);
 		}
 		
 		return ConfiguredProcessorUtil.toRestConfiguredProcessor(modelConfiguredProcessor);
@@ -446,19 +390,42 @@ public class ConfiguredProcessorManager {
 
 		// Check arguments
 		if (null == id) {
-			throw new IllegalArgumentException(logError(MSG_CONFIGURED_PROCESSOR_ID_MISSING, MSG_ID_CONFIGURED_PROCESSOR_ID_MISSING, id));
+			throw new IllegalArgumentException(logger.log(ProcessorMgrMessage.CONFIGURED_PROCESSOR_ID_MISSING, id));
 		}
 		
 		Optional<de.dlr.proseo.model.ConfiguredProcessor> modelConfiguredProcessor = RepositoryService.getConfiguredProcessorRepository().findById(id);
 		
 		if (modelConfiguredProcessor.isEmpty()) {
-			throw new EntityNotFoundException(logError(MSG_CONFIGURED_PROCESSOR_ID_NOT_FOUND, MSG_ID_CONFIGURED_PROCESSOR_ID_NOT_FOUND, id));
+			throw new EntityNotFoundException(logger.log(ProcessorMgrMessage.CONFIGURED_PROCESSOR_ID_NOT_FOUND, id));
 		}
 		
 		// Ensure user is authorized for the mission of the configured processor
 		if (!securityService.isAuthorizedForMission(modelConfiguredProcessor.get().getProcessor().getProcessorClass().getMission().getCode())) {
-			throw new SecurityException(logError(MSG_ILLEGAL_CROSS_MISSION_ACCESS, MSG_ID_ILLEGAL_CROSS_MISSION_ACCESS,
+			throw new SecurityException(logger.log(GeneralMessage.ILLEGAL_CROSS_MISSION_ACCESS,
 					modelConfiguredProcessor.get().getProcessor().getProcessorClass().getMission().getCode(), securityService.getMission()));			
+		}
+		
+		// Check whether there are still products referencing this configured processor
+		// (restricted to the product classes processable by the processor class for efficiency)
+		ProcessorClass processorClass = modelConfiguredProcessor.get().getProcessor().getProcessorClass();
+		if (!processorClass.getProductClasses().isEmpty()) {
+			String jpqlQuery = "select count(p) from Product p where p.productClass in :productClasses and p.configuredProcessor = :configuredProcessor";
+			Query query = em.createQuery(jpqlQuery);
+			query.setParameter("productClasses", processorClass.getProductClasses());
+			query.setParameter("configuredProcessor", modelConfiguredProcessor.get());
+			Object result = query.getSingleResult();
+			if (!(result instanceof Number) || 0 != ((Number) result).intValue()) {
+				throw new IllegalArgumentException(logger.log(ProcessorMgrMessage.CONFIGURED_PROCESSOR_HAS_PRODUCTS, modelConfiguredProcessor.get().getIdentifier(), result));
+			} 
+		}
+		// Check whether there are selection rules referencing this configured processor
+		String sqlQuery = "SELECT COUNT(*) FROM simple_selection_rule_applicable_configured_processors WHERE configured_processors_id = :id";
+		Query query = em.createNativeQuery(sqlQuery);
+		query.setParameter("id", modelConfiguredProcessor.get().getId());
+		Object result = query.getSingleResult();
+		if (!(result instanceof Number) || 0 != ((Number) result).intValue()) {
+			throw new IllegalArgumentException(logger.log(ProcessorMgrMessage.CONFIGURED_PROCESSOR_HAS_SELECTION_RULES,
+					modelConfiguredProcessor.get().getIdentifier(), result));
 		}
 		
 		// Delete the configured processor
@@ -467,10 +434,10 @@ public class ConfiguredProcessorManager {
 		// Test whether the deletion was successful
 		modelConfiguredProcessor = RepositoryService.getConfiguredProcessorRepository().findById(id);
 		if (!modelConfiguredProcessor.isEmpty()) {
-			throw new RuntimeException(logError(MSG_DELETION_UNSUCCESSFUL, MSG_ID_DELETION_UNSUCCESSFUL, id));
+			throw new RuntimeException(logger.log(ProcessorMgrMessage.DELETION_UNSUCCESSFUL, id));
 		}
 		
-		logInfo(MSG_CONFIGURED_PROCESSOR_DELETED, MSG_ID_CONFIGURED_PROCESSOR_DELETED, id);
+		logger.log(ProcessorMgrMessage.CONFIGURED_PROCESSOR_DELETED, id);
 	}
 
 }

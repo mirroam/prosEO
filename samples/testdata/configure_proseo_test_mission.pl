@@ -2,10 +2,10 @@
 eval 'exec perl -S $0 $*' if 0;
 
 #
-# configure_s5p_proseo.pl
-# -----------------------
+# configure_proseo_test_mission.pl
+# --------------------------------
 #
-# Configure prosEO for the Sentinel-5 Precursor (S5P) mission
+# Configure prosEO for the prosEO Test Mission (PTM)
 #
 use 5.016;
 use strict;
@@ -25,14 +25,14 @@ my $defaults = {
 	processor_sensing_time_flag => 1,
 	task_is_critical => 1,
 	task_criticality_level => 10,
-	task_number_of_cpus => 16,
+	task_number_of_cpus => 3,
 	task_breakpoint_file_names => [],
 	configuration_product_quality => 'TEST',
 	product_class_visibility => 'PUBLIC',
 	selection_rule_mode => 'OPER'
 };
 my $CLI_SCRIPT_NAME = 'cli_script.txt';
-my $TEST_FILE_DIR = 'testfiles';
+my $OUT_FILE_DIR = 'testfiles';
 
 #
 # -- Main script
@@ -42,14 +42,13 @@ my $TEST_FILE_DIR = 'testfiles';
 # -- User management
 #
 my $ADMIN_USER = 'sysadm';
-my $ADMIN_PWD = 'sysadm';
+# The sysadm password must be provided in the working directory in a credentials file
 
 my $USERMGR_USER = 'usermgr';
-my $USERMGR_PWD = 'usermgr';
-my $USERMGR_AUTHORITIES = 'ROLE_MISSION_READER,ROLE_USERMGR,ROLE_CLI_USER,ROLE_GUI_USER';
+my $USERMGR_PWD = 'userMgr.456';
 
 my $CONFIG_USER = 'proseo';
-my $CONFIG_PWD = 'proseo';
+my $CONFIG_PWD = 'prosEO.789';
 
 my @groups = (
     {
@@ -82,10 +81,16 @@ my @groups = (
     },
     {
         name => 'internalprocessor',
-        authorities => [ 'PRODUCT_GENERATOR', 'JOBSTEP_PROCESSOR']
+        authorities => [ 'PRODUCT_GENERATOR', 'PRODUCT_INGESTOR', 'JOBSTEP_PROCESSOR']
     }
 );
 my @users = (
+    {
+        name => $USERMGR_USER,
+        pwd => $USERMGR_PWD,
+        authorities => [ 'MISSION_READER', 'USERMGR', 'CLI_USER', 'GUI_USER' ],
+        groups => [ ]
+    },
     {
         name => $CONFIG_USER,
         pwd => $CONFIG_PWD,
@@ -93,20 +98,20 @@ my @users = (
         groups => [ 'operator', 'archivist', 'engineer', 'approver' ]
     },
     {
-        name => 'esaprip',
-        pwd => 'esaprip',
+        name => 'sciuserprip',
+        pwd => 'sciUserPrip.012',
         authorities => [],
         groups => [ 'prippublic' ]
     },
     {
-        name => 'knmiprip',
-        pwd => 'knmiprip',
+        name => 'cfidevprip',
+        pwd => 'cfiDevPrip.678',
         authorities => [],
         groups => [ 'externalprocessor' ]
     },
     {
         name => 'wrapper',
-        pwd => 'ingest&plan',
+        pwd => 'ingest&Plan',
         authorities => [],
         groups => [ 'internalprocessor' ]
     }
@@ -125,12 +130,13 @@ my $mission = {
             '${T(java.time.format.DateTimeFormatter).ofPattern(\\"uuuuMMdd\'T\'HHmmss\\").withZone(T(java.time.ZoneId).of(\\"UTC\\")).format(sensingStartTime)}_' .
             '${T(java.time.format.DateTimeFormatter).ofPattern(\\"uuuuMMdd\'T\'HHmmss\\").withZone(T(java.time.ZoneId).of(\\"UTC\\")).format(sensingStopTime)}_' .
             '${(new java.text.DecimalFormat(\\"00000\\")).format(null == orbit ? 0 : orbit.orbitNumber)}_' .
-            '${parameters.get(\\"copernicusCollection\\").getParameterValue()}_' .
+            '${parameters.get(\\"revision\\").getParameterValue()}_' .
             '${configuredProcessor.processor.processorVersion.replaceAll(\\"\\\\\\\\.\\", \\"\\")}_' .
-            '${T(java.time.format.DateTimeFormatter).ofPattern(\\"uuuuMMdd\'T\'HHmmss\\").withZone(T(java.time.ZoneId).of(\\"UTC\\")).format(generationTime)}.nc'
-
+            '${T(java.time.format.DateTimeFormatter).ofPattern(\\"uuuuMMdd\'T\'HHmmss\\").withZone(T(java.time.ZoneId).of(\\"UTC\\")).format(generationTime)}.nc',
+    processingCentre => 'PTM-PDGS',
+    productRetentionPeriod => 30 * 24 * 3600
 };
-my $spacecraft = { code => 'PTS', name => 'prosEO Test Satellite' };
+my $spacecraft = { code => 'PTS', name => 'prosEO Test Satellite', payloadName => 'PTS-SENSOR', payloadDescription => 'Super sensor for PTM' };
 my @orbits = (
     { orbitNumber => 3000, startTime => '2019-11-04T09:00:00.200000', stopTime => '2019-11-04T10:41:10.300000' },
     { orbitNumber => 3001, startTime => '2019-11-04T10:41:10.300000', stopTime => '2019-11-04T12:22:20.400000' },
@@ -152,7 +158,7 @@ my @processors = (
     	tasks => [ 
     	   { taskName => 'ptm_l01b', taskVersion => '0.1.0' }
     	],
-    	dockerImage => 'localhost:5000/proseo-sample-wrapper:0.5.2'
+    	dockerImage => 'localhost:5000/proseo-sample-wrapper:0.9.4'
     },
     {
         processorName => 'PTML2', 
@@ -161,7 +167,7 @@ my @processors = (
         tasks => [ 
            { taskName => 'ptm_l2', taskVersion => '0.1.0' }
         ],
-        dockerImage => 'localhost:5000/proseo-sample-wrapper:0.5.2'
+        dockerImage => 'localhost:5000/proseo-sample-wrapper:0.9.4'
     },
     {
         processorName => 'PTML3', 
@@ -170,13 +176,14 @@ my @processors = (
         tasks => [ 
            { taskName => 'ptm_l3', taskVersion => '0.1.0' }
         ],
-        dockerImage => 'localhost:5000/proseo-sample-wrapper:0.5.2'
+        dockerImage => 'localhost:5000/proseo-sample-wrapper:0.9.4'
     }
 );
 my @configurations = (
     { 
     	processorName => 'PTML1B', 
     	configurationVersion => 'OPER_2020-03-25', 
+    	mode => 'OPER',
     	dynProcParameters => [ 
     	   { key => 'logging.root', parameterType => 'STRING', parameterValue => 'notice' },
            { key => 'logging.dumplog', parameterType => 'STRING', parameterValue => 'null' },
@@ -192,6 +199,7 @@ my @configurations = (
     { 
     	processorName => 'PTML2', 
     	configurationVersion => 'OPER_2020-03-25', 
+        mode => 'OPER',
         dynProcParameters => [ 
            { key => 'logging.root', parameterType => 'STRING', parameterValue => 'notice' },
            { key => 'logging.dumplog', parameterType => 'STRING', parameterValue => 'null' },
@@ -207,6 +215,7 @@ my @configurations = (
     { 
     	processorName => 'PTML3', 
     	configurationVersion => 'OPER_2020-03-25', 
+        mode => 'OPER',
         dynProcParameters => [ 
            { key => 'logging.root', parameterType => 'STRING', parameterValue => 'notice' },
            { key => 'logging.dumplog', parameterType => 'STRING', parameterValue => 'null' },
@@ -242,8 +251,10 @@ my @configured_processors = (
 #
 # -- Selection rules (OFFL mode only!)
 #
-my %product_types;
+my @product_types;
+my %visibilities;
 my %enclosing_product_types;
+my %processing_levels;
 my %product_processor_class;
 my %slicing_types;
 my %slice_durations;
@@ -251,60 +262,68 @@ my %selection_rules;
 my %applicable_processors;
 
 # Product types without processor
-$product_types{'L0________'} = 'L0________';
-    
-$product_types{'AUX_IERS_B'} = 'AUX_IERS_B';
+push @product_types, 'PTM_L0';
+$visibilities{'PTM_L0'} = 'RESTRICTED';
+push @product_types, 'AUX_IERS_B';
+$visibilities{'AUX_IERS_B'} = 'INTERNAL';
     
 # Selection rule for PTM L1B
 # Expected time coverage of the L1B products is on orbit
-$product_types{'L1B_______'} = 'L1B_______';
-$product_types{'L1B_PART1'} = 'L1B_PART1';
-$product_types{'L1B_PART2'} = 'L1B_PART2';
-$enclosing_product_types{'L1B_PART1'} = 'L1B_______';
-$enclosing_product_types{'L1B_PART2'} = 'L1B_______';
-$slicing_types{'L1B_______'} = 'ORBIT';
-$product_processor_class{'L1B_______'} = 'PTML1B';
+push @product_types, 'PTM_L1B';
+push @product_types, 'PTM_L1B_P1';
+push @product_types, 'PTM_L1B_P2';
+$enclosing_product_types{'PTM_L1B_P1'} = 'PTM_L1B';
+$enclosing_product_types{'PTM_L1B_P2'} = 'PTM_L1B';
+$processing_levels{'PTM_L1B'} = 'L1B';
+$processing_levels{'PTM_L1B_P1'} = 'L1B';
+$processing_levels{'PTM_L1B_P2'} = 'L1B';
+$slicing_types{'PTM_L1B'} = 'ORBIT';
+$product_processor_class{'PTM_L1B'} = 'PTML1B';
 # Output L1B
-$selection_rules{'L1B_______'} = '
-    FOR L0________ SELECT ValIntersect(0, 0);
+$selection_rules{'PTM_L1B'} = '
+    FOR PTM_L0 SELECT ValIntersect(0, 0);
     FOR AUX_IERS_B SELECT LatestValIntersect(60 D, 60 D)';
-$applicable_processors{'L1B_______'} = [ 'PTML1B_0.1.0_OPER_2020-03-25' ];
+$applicable_processors{'PTM_L1B'} = [ 'PTML1B_0.1.0_OPER_2020-03-25' ];
 
 # Selection rules for PTM L2
 # Expected time coverage of the L2 products is on orbit (same as for the L1B product)
 
-# Output PTM_L2A
-$product_types{'PTM_L2A'} = 'PTM_L2A';
-$slicing_types{'PTM_L2A'} = 'ORBIT';
-$product_processor_class{'PTM_L2A'} = 'PTML2';
-$selection_rules{'PTM_L2A'} = '
-    FOR L1B_______ SELECT LatestValCover(0, 0)';
-$applicable_processors{'PTM_L2A'} = [ 'PTML2_0.1.0_OPER_2020-03-25' ];
-# Output PTM_L2B
-$product_types{'PTM_L2B'} = 'PTM_L2B';
-$slicing_types{'PTM_L2B'} = 'ORBIT';
-$product_processor_class{'PTM_L2B'} = 'PTML2';
-$selection_rules{'PTM_L2B'} = '
-    FOR L1B_PART1 SELECT LatestValCover(0, 0)';
-$applicable_processors{'PTM_L2B'} = [ 'PTML2_0.1.0_OPER_2020-03-25' ];
+# Output PTM_L2_A
+push @product_types, 'PTM_L2_A';
+$processing_levels{'PTM_L2_A'} = 'L2A';
+$slicing_types{'PTM_L2_A'} = 'ORBIT';
+$product_processor_class{'PTM_L2_A'} = 'PTML2';
+$selection_rules{'PTM_L2_A'} = '
+    FOR PTM_L1B SELECT LatestValCover(0, 0)';
+$applicable_processors{'PTM_L2_A'} = [ 'PTML2_0.1.0_OPER_2020-03-25' ];
+# Output PTM_L2_B
+push @product_types, 'PTM_L2_B';
+$processing_levels{'PTM_L2_B'} = 'L2B';
+$slicing_types{'PTM_L2_B'} = 'ORBIT';
+$product_processor_class{'PTM_L2_B'} = 'PTML2';
+$selection_rules{'PTM_L2_B'} = '
+    FOR PTM_L1B_P1 SELECT LatestValCover(0, 0)';
+$applicable_processors{'PTM_L2_B'} = [ 'PTML2_0.1.0_OPER_2020-03-25' ];
 
 # Selection rules for PTM L3
 # Expected time coverage of the L3 products is 4 hours
 # Output PTM_L3
-$product_types{'PTM_L3'} = 'PTM_L3';
+push @product_types, 'PTM_L3';
+$processing_levels{'PTM_L3'} = 'L3';
 $slicing_types{'PTM_L3'} = 'TIME_SLICE';
 $slice_durations{'PTM_L3'} = 14400;
 $product_processor_class{'PTM_L3'} = 'PTML3';
 $selection_rules{'PTM_L3'} = '
-    FOR PTM_L2A SELECT ValIntersect(0, 0) MINCOVER(90);
-    FOR PTM_L2B SELECT ValIntersect(0, 0) MINCOVER(90)';
+    FOR PTM_L2_A SELECT ValIntersect(0, 0) MINCOVER(90);
+    FOR PTM_L2_B SELECT ValIntersect(0, 0) MINCOVER(90)';
 $applicable_processors{'PTM_L3'} = [ 'PTML3_0.1.0_OPER_2020-03-25' ];
 
 
 # --- Output creation script ---
-# Ensure test file directory exists
-if ( ! -e $TEST_FILE_DIR ) {
-	make_path( $TEST_FILE_DIR );
+
+# Ensure output file directory exists
+if ( ! -e $OUT_FILE_DIR ) {
+	make_path( $OUT_FILE_DIR );
 }
 
 # Create output file for CLI script
@@ -312,11 +331,11 @@ say '... starting CLI script';
 my $cli_script = FileHandle->new( $CLI_SCRIPT_NAME, 'w' ) or error_die( 'Cannot open script file ' . $CLI_SCRIPT_NAME );
 
 # Login as admin user
-print $cli_script "login -usysadm -psysadm\n";
+print $cli_script "login -i$ADMIN_USER.cred\n";
 
 # Output mission
 say '... creating mission';
-my $filename = $TEST_FILE_DIR . "/" . $mission->{code} . '.json';
+my $filename = $OUT_FILE_DIR . "/" . $mission->{code} . '.json';
 my $fh = FileHandle->new( $filename, 'w' ) or error_die( 'Cannot open output file ' . $filename );
     
 print $fh "{\n";
@@ -347,9 +366,15 @@ foreach my $processing_mode ( @{ $mission->{processingModes} } ) {
 }
 print $fh ' ],' . "\n";
 print $fh '    "productFileTemplate": "' . $mission->{productFileTemplate} . '",' . "\n";
+print $fh '    "processingCentre": "' . $mission->{processingCentre} . '",' . "\n";
+print $fh '    "productRetentionPeriod": ' . $mission->{productRetentionPeriod} . ',' . "\n";
 print $fh '    "spacecrafts": [ {' . "\n";
 print $fh '        "code": "' . $spacecraft->{code} . '",' . "\n";
-print $fh '        "name": "' . $spacecraft->{name} . '"' . "\n";
+print $fh '        "name": "' . $spacecraft->{name} . '",' . "\n";
+print $fh '        "payloads": [ {' . "\n";
+print $fh '            "name": "' . $spacecraft->{payloadName} . '",' . "\n";
+print $fh '            "description": "' . $spacecraft->{payloadDescription} . '"' . "\n";
+print $fh '        } ]' . "\n";
 print $fh '    } ]' . "\n";
 print $fh '}' . "\n";
 $fh->close();
@@ -357,9 +382,38 @@ print $cli_script 'mission create --file=' . $filename . "\n";
 
 # Create first mission users
 say '... creating mission users';
-print $cli_script 'user create --mission=' . $mission->{code} . ' ' . $USERMGR_USER . ' password=' . $USERMGR_PWD . ' authorities=' . $USERMGR_AUTHORITIES . "\n";
-print $cli_script 'login --user=' . $USERMGR_USER . ' --password=' . $USERMGR_PWD . ' PTM' . "\n";
 
+foreach my $user ( @users ) {
+    my $credential_file_name = $OUT_FILE_DIR . '/' . $user->{name} . '.cred';
+    my $credential_file = FileHandle->new( $credential_file_name, 'w' ) or error_die( 'Cannot create credentials file for ' . $user->{name} );
+    print $credential_file $user->{name} . "\n";
+    print $credential_file $user->{pwd} . "\n";
+    close $credential_file;
+    chmod 0600, $credential_file_name;
+    
+    if ( $USERMGR_USER eq $user->{name} ) {
+       print $cli_script 'user create  --mission=' . $mission->{code} . ' --identFile=' . $credential_file_name . ' ' . $user->{name};
+    }
+    else {
+        print $cli_script 'user create --identFile=' . $credential_file_name . ' ' . $user->{name};
+    }
+    $first = 1;
+    foreach my $authority ( @{ $user->{authorities} } ) {
+        if ( $first ) {
+            $first = 0;
+            print $cli_script ' authorities=';
+        }
+        else {
+            print $cli_script ',';
+        }
+        print $cli_script 'ROLE_' . $authority;
+    }
+    print $cli_script "\n";
+    
+    if ( $USERMGR_USER eq $user->{name} ) {
+       print $cli_script "login --identFile=$OUT_FILE_DIR/$USERMGR_USER.cred $mission->{code}\n";
+    }
+}
 foreach my $group ( @groups ) {
     print $cli_script 'group create ' . $group->{name} . "\n";
     foreach my $authority ( @{ $group->{authorities} } ) {
@@ -367,21 +421,23 @@ foreach my $group ( @groups ) {
     }
 }
 foreach my $user ( @users ) {
-    print $cli_script 'user create ' . $user->{name} . ' password=' . $user->{pwd} . "\n";
-    foreach my $authority ( @{ $user->{authorities} } ) {
-        print $cli_script 'user grant ' . $user->{name} . ' ROLE_' . $authority . "\n";
-    }
     foreach my $group ( @{ $user->{groups} } ) {
         print $cli_script 'group add ' . $group . ' ' . $user->{name} . "\n";
     }
 }
 
 # Perform the remaining configuration steps as regular user
-print $cli_script 'login --user=' . $CONFIG_USER . ' --password=' . $CONFIG_PWD . ' '. $mission->{code} . "\n";
+my $credential_file = FileHandle->new( $OUT_FILE_DIR . '/' . $CONFIG_USER . '.cred', 'w' ) or error_die( 'Cannot create credentials file for ' . $CONFIG_USER );
+print $credential_file $CONFIG_USER . "\n";
+print $credential_file $CONFIG_PWD . "\n";
+close $credential_file;
+chmod 0600, $OUT_FILE_DIR . '/' . $CONFIG_USER . '.cred';
+
+print $cli_script 'login -i' . $OUT_FILE_DIR . '/' . $CONFIG_USER . '.cred '. $mission->{code} . "\n";
 
 # Create spacecraft orbits
 say '... creating spacecraft orbits';
-$filename = $TEST_FILE_DIR . "/" . $mission->{code} . '_orbits.json';
+$filename = $OUT_FILE_DIR . "/" . $mission->{code} . '_orbits.json';
 $fh = FileHandle->new( $filename, 'w' ) or error_die( 'Cannot open output file ' . $filename );
 
 print $fh '[' . "\n";
@@ -393,16 +449,16 @@ foreach my $orbit ( @orbits ) {
 	else {
 		print $fh ",\n";
 	}
-	print $fh '    { "spacecraftCode": "' . $spacecraft->{code} . '", "orbitNumber": ' , $orbit->{orbitNumber} . ', "startTime": "' . $orbit->{startTime} . '", "stopTime": "' . $orbit->{stopTime} . '" }';
+	print $fh '    { "missionCode": "' . $mission->{code} . '", "spacecraftCode": "' . $spacecraft->{code} . '", "orbitNumber": ' , $orbit->{orbitNumber} . ', "startTime": "' . $orbit->{startTime} . '", "stopTime": "' . $orbit->{stopTime} . '" }';
 }
 print $fh "\n]\n";
 $fh->close();
 print $cli_script 'orbit create --file=' . $filename . "\n";
 
-# Create processors classes
+# Create processor classes
 say '... creating processor classes';
 foreach my $processor_class ( @processor_classes ) {
-	$filename = $TEST_FILE_DIR . "/" . $mission->{code} . '_' . $processor_class . '.json';
+	$filename = $OUT_FILE_DIR . "/" . $mission->{code} . '_' . $processor_class . '.json';
 	$fh = FileHandle->new( $filename, 'w' ) or error_die( 'Cannot open output file ' . $filename );
 
 	print $fh '{ "missionCode": "' . $mission->{code} . '", "processorName": "' . $processor_class . '", "productClasses": [] }' . "\n";
@@ -414,7 +470,7 @@ foreach my $processor_class ( @processor_classes ) {
 # Create processor versions
 say '... creating processor versions';
 foreach my $processor ( @processors ) {
-    $filename = $TEST_FILE_DIR . "/" . $mission->{code} . '_' . $processor->{processorName} . '_' . $processor->{processorVersion} . '.json';
+    $filename = $OUT_FILE_DIR . "/" . $mission->{code} . '_' . $processor->{processorName} . '_' . $processor->{processorVersion} . '.json';
     $fh = FileHandle->new( $filename, 'w' ) or error_die( 'Cannot open output file ' . $filename );
 
 	print $fh '{ "missionCode": "' . $mission->{code} . '", "processorName": "' . $processor->{processorName} . '", "processorVersion": "' . $processor->{processorVersion} . '", ';
@@ -455,12 +511,13 @@ foreach my $processor ( @processors ) {
 # Create configurations
 say '... creating configurations';
 foreach my $configuration ( @configurations ) {
-    $filename = $TEST_FILE_DIR . "/" . $mission->{code} . '_' . $configuration->{processorName} . '_conf_' . $configuration->{configurationVersion} . '.json';
+    $filename = $OUT_FILE_DIR . "/" . $mission->{code} . '_' . $configuration->{processorName} . '_conf_' . $configuration->{configurationVersion} . '.json';
     $fh = FileHandle->new( $filename, 'w' ) or error_die( 'Cannot open output file ' . $filename );
 
     print $fh '{ "missionCode": "' . $mission->{code} 
         . '", "processorName": "' . $configuration->{processorName} 
         . '", "configurationVersion": "' . $configuration->{configurationVersion} 
+        . ( $configuration->{mode} ? '", "mode": "' .$configuration->{mode} : '' )
         . '", "productQuality": "' . $defaults->{configuration_product_quality} 
         . '", "dynProcParameters": [ ';
     my $innerfirst = 1;
@@ -522,18 +579,24 @@ foreach my $configured_processor ( @configured_processors ) {
         . $configured_processor->{configurationVersion} . "\n";
 }
 
-# Create product classes (sequence is important due to selection rule dependencies)
+# Create product classes
 say '... creating product classes';
-my @class_key_sequence = ( 'L0________', 'AUX_IERS_B', 'L1B_______', 'L1B_PART1', 'L1B_PART2', 'PTM_L2A', 'PTM_L2B', 'PTM_L3' );
 
-foreach my $product_class ( @class_key_sequence ) {
-    $filename = $TEST_FILE_DIR . "/" . $mission->{code} . '_' . $product_types{$product_class} . '.json';
+foreach my $product_class ( @product_types ) {
+    $filename = $OUT_FILE_DIR . "/" . $mission->{code} . '_' . $product_class . '.json';
     $fh = FileHandle->new( $filename, 'w' ) or error_die( 'Cannot open output file ' . $filename );
 
 	print $fh '{ ';
 	print $fh '"missionCode": "' . $mission->{code} . '"';
-	print $fh ', "productType": "' . $product_types{$product_class} . '"';
-    print $fh ', "visibility": "' . $defaults->{product_class_visibility} . '"';
+	print $fh ', "productType": "' . $product_class . '"';
+    if ( $processing_levels{$product_class} ) {
+        print $fh ', "processingLevel": "' . $processing_levels{$product_class} . '"';
+    }
+    if ( $visibilities{$product_class} ) {
+        print $fh ', "visibility": "' . $visibilities{$product_class} . '"';
+    } else {
+        print $fh ', "visibility": "' . $defaults->{product_class_visibility} . '"';
+    }
 	if ( $product_processor_class{$product_class} ) {
         print $fh ', "processorClass": "' . $product_processor_class{$product_class} . '"';
 	}
@@ -549,16 +612,18 @@ foreach my $product_class ( @class_key_sequence ) {
     print $fh " }\n";
     $fh->close();
     print $cli_script 'productclass create --file=' . $filename . "\n";
+}
 
+foreach my $product_class ( @product_types ) {
 	if ($selection_rules{$product_class}) {
-	    $filename = $TEST_FILE_DIR . "/" . $mission->{code} . '_' . $product_types{$product_class} . '_rule.txt';
+	    $filename = $OUT_FILE_DIR . "/" . $mission->{code} . '_' . $product_class . '_rule.txt';
 	    $fh = FileHandle->new( $filename, 'w' ) or error_die( 'Cannot open output file ' . $filename );
 
         print $fh $selection_rules{$product_class} . "\n";
         $fh->close();
 
 		print $cli_script 'productclass rule create --file=' . $filename . ' --format=PLAIN '
-		    . $product_types{$product_class}
+		    . $product_class
 		    . ' mode=' . $defaults->{selection_rule_mode} 
             . ' configuredProcessors=';
         my $innerfirst = 1;
@@ -576,5 +641,9 @@ foreach my $product_class ( @class_key_sequence ) {
 }
 print $cli_script "exit\n";
 $cli_script->close();
+
+say 'IMPORTANT:';
+say '(1) Please change user passwords after completing script-based configuration!';
+say '(2) Make sure the sysadm credentials are present in sysadm.cred!';
 
 say '--- prosEO Test Mission setup complete ---';

@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="ProjectModuleManager">
+    <modules>
+      <module fileurl="file://$PROJECT_DIR$/proseo.iml" filepath="$PROJECT_DIR$/proseo.iml" />
+      <module fileurl="file://$PROJECT_DIR$/api/proseo-api.iml" filepath="$PROJECT_DIR$/api/proseo-api.iml" />
+      <module fileurl="file://$PROJECT_DIR$/api/prip/proseo-api-prip.iml" filepath="$PROJECT_DIR$/api/prip/proseo-api-prip.iml" />
+      <module fileurl="file://$PROJECT_DIR$/base-wrapper/proseo-base-wrapper.iml" filepath="$PROJECT_DIR$/base-wrapper/proseo-base-wrapper.iml" />
+      <module fileurl="file://$PROJECT_DIR$/common/proseo-common.iml" filepath="$PROJECT_DIR$/common/proseo-common.iml" />
+      <module fileurl="file://$PROJECT_DIR$/facility-mgr/proseo-facility-mgr.iml" filepath="$PROJECT_DIR$/facility-mgr/proseo-facility-mgr.iml" />
+      <module fileurl="file://$PROJECT_DIR$/ingestor/proseo-ingestor.iml" filepath="$PROJECT_DIR$/ingestor/proseo-ingestor.iml" />
+      <module fileurl="file://$PROJECT_DIR$/interfaces/proseo-interfaces.iml" filepath="$PROJECT_DIR$/interfaces/proseo-interfaces.iml" />
+      <module fileurl="file://$PROJECT_DIR$/model/proseo-model.iml" filepath="$PROJECT_DIR$/model/proseo-model.iml" />
+      <module fileurl="file://$PROJECT_DIR$/order-mgr/proseo-order-mgr.iml" filepath="$PROJECT_DIR$/order-mgr/proseo-order-mgr.iml" />
+      <module fileurl="file://$PROJECT_DIR$/planner/proseo-planner.iml" filepath="$PROJECT_DIR$/planner/proseo-planner.iml" />
+      <module fileurl="file://$PROJECT_DIR$/processor-mgr/proseo-processor-mgr.iml" filepath="$PROJECT_DIR$/processor-mgr/proseo-processor-mgr.iml" />
+      <module fileurl="file://$PROJECT_DIR$/productclass-mgr/proseo-productclass-mgr.iml" filepath="$PROJECT_DIR$/productclass-mgr/proseo-productclass-mgr.iml" />
+      <module fileurl="file://$PROJECT_DIR$/samples/sample-processor/proseo-sample-processor.iml" filepath="$PROJECT_DIR$/samples/sample-processor/proseo-sample-processor.iml" />
+      <module fileurl="file://$PROJECT_DIR$/samples/sample-wrapper/proseo-sample-wrapper.iml" filepath="$PROJECT_DIR$/samples/sample-wrapper/proseo-sample-wrapper.iml" />
+      <module fileurl="file://$PROJECT_DIR$/samples/proseo-samples.iml" filepath="$PROJECT_DIR$/samples/proseo-samples.iml" />
+      <module fileurl="file://$PROJECT_DIR$/storage-mgr/proseo-storage-mgr.iml" filepath="$PROJECT_DIR$/storage-mgr/proseo-storage-mgr.iml" />
+      <module fileurl="file://$PROJECT_DIR$/ui/proseo-ui.iml" filepath="$PROJECT_DIR$/ui/proseo-ui.iml" />
+      <module fileurl="file://$PROJECT_DIR$/ui/backend/proseo-ui-backend.iml" filepath="$PROJECT_DIR$/ui/backend/proseo-ui-backend.iml" />
+      <module fileurl="file://$PROJECT_DIR$/ui/cli/proseo-ui-cli.iml" filepath="$PROJECT_DIR$/ui/cli/proseo-ui-cli.iml" />
+      <module fileurl="file://$PROJECT_DIR$/ui/gui/proseo-ui-gui.iml" filepath="$PROJECT_DIR$/ui/gui/proseo-ui-gui.iml" />
+      <module fileurl="file://$PROJECT_DIR$/user-mgr/proseo-user-mgr.iml" filepath="$PROJECT_DIR$/user-mgr/proseo-user-mgr.iml" />
+    </modules>
+  </component>
+</project>

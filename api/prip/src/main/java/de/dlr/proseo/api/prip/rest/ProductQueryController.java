@@ -6,19 +6,23 @@
 package de.dlr.proseo.api.prip.rest;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.util.ArrayList;
 import javax.servlet.ServletException;
-//import javax.persistence.EntityNotFoundException;
-//import javax.persistence.NoResultException;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletRequestWrapper;
 import javax.servlet.http.HttpServletResponse;
 import org.slf4j.LoggerFactory;
 import org.apache.olingo.commons.api.edmx.EdmxReference;
+import org.apache.olingo.commons.api.format.ContentType;
 import org.apache.olingo.commons.api.http.HttpStatusCode;
 import org.apache.olingo.server.api.OData;
 import org.apache.olingo.server.api.ODataHttpHandler;
 import org.apache.olingo.server.api.ServiceMetadata;
+import org.apache.olingo.server.api.debug.DebugSupport;
+import org.apache.olingo.server.api.debug.DefaultDebugSupport;
+import org.apache.olingo.server.api.serializer.ODataSerializer;
+import org.apache.olingo.server.api.serializer.SerializerException;
 import org.slf4j.Logger;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.validation.annotation.Validated;
@@ -26,6 +30,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import de.dlr.proseo.api.prip.ProductionInterfaceSecurity;
+import de.dlr.proseo.api.prip.odata.LogUtil;
 import de.dlr.proseo.api.prip.odata.ProductEdmProvider;
 import de.dlr.proseo.api.prip.odata.ProductEntityCollectionProcessor;
 import de.dlr.proseo.api.prip.odata.ProductEntityProcessor;
@@ -39,13 +44,14 @@ import de.dlr.proseo.api.prip.odata.ProductEntityProcessor;
  */
 @RestController
 @Validated
-@RequestMapping(value = ProductQueryController.URI, produces = "application/json")
+@RequestMapping(value = ProductQueryController.URI, produces = {"application/json", "application/octet-stream"})
 public class ProductQueryController {
 
 	/* Message ID constants */
-	// private static final int MSG_ID_NOT_IMPLEMENTED = 9000;
-
+	private static final int MSG_ID_USER_LOGGED_IN = 5099;
+	
 	/* Message string constants */
+	private static final String MSG_USER_LOGGED_IN = "(I%d) User %s\\%s logged in to PRIP API";
 	private static final String HTTP_HEADER_WARNING = "Warning";
 //	private static final String HTTP_MSG_PREFIX = "199 proseo-api-prip ";
 
@@ -80,26 +86,46 @@ public class ProductQueryController {
 	 */
 	@RequestMapping(value = "/**")
 	protected void service(final HttpServletRequest request, HttpServletResponse response) throws ServletException {
-		if (logger.isTraceEnabled()) logger.trace(">>> service({}, {})", request, response);
+		if (logger.isTraceEnabled()) logger.trace(">>> service({}, {})", 
+				(null == request ? "null" : request.getRequestURL()), response);
 		
+		// Create OData handler
+		OData odata = OData.newInstance();
+
+		// Configure OData handler with EDM provider and processors
+		ServiceMetadata edm = odata.createServiceMetadata(edmProvider, new ArrayList<EdmxReference>());
+		ODataHttpHandler handler = odata.createHandler(edm);
+		handler.register(entityCollectionProcessor);
+		handler.register(entityProcessor);
+		DebugSupport debugSupport = new DefaultDebugSupport();
+		debugSupport.init(odata);
+		handler.register(debugSupport);
+
 		// Analyze authentication information and make sure user is authorized for using the PRIP API
 		try {
 			securityConfig.doLogin(request);
 		} catch (SecurityException e) {
+			try {
+				ODataSerializer serializer = odata.createSerializer(ContentType.JSON);
+				String message = new String(serializer.error(
+						LogUtil.oDataServerError(HttpStatusCode.UNAUTHORIZED.getStatusCode(), e.getMessage()))
+						.getContent().readAllBytes());
+				response.getWriter().print(message);
+			} catch (Exception e1) {
+				// Log to Standard Error, but otherwise ignore (we just don't have a response body then)
+				logger.error("Exception setting response content: ", e1);
+			}
 			response.setStatus(HttpStatusCode.UNAUTHORIZED.getStatusCode());
 			response.setHeader(HTTP_HEADER_WARNING, e.getMessage()); // Message already logged and formatted
 			return;
+		} catch (RuntimeException e) {
+			logger.error("Server Error occurred in ProductionInterfaceSecurity", e);
+			throw new ServletException(e);
 		}
+		LogUtil.logInfo(logger, MSG_USER_LOGGED_IN, MSG_ID_USER_LOGGED_IN, securityConfig.getMission(), securityConfig.getUser());
 		
 		// Execute the request
 		try {
-			// Create OData handler and configure it with EDM provider and processors
-			OData odata = OData.newInstance();
-			ServiceMetadata edm = odata.createServiceMetadata(edmProvider, new ArrayList<EdmxReference>());
-			ODataHttpHandler handler = odata.createHandler(edm);
-			handler.register(entityCollectionProcessor);
-			handler.register(entityProcessor);
-
 			// Let the handler do the work
 			handler.process(new HttpServletRequestWrapper(request) {
 				// Spring MVC matches the whole path as the servlet path, but Olingo wants just the prefix, i.e. up to
@@ -109,7 +135,8 @@ public class ProductQueryController {
 					return URI;
 				}
 			}, response);
-		} catch (RuntimeException e) {
+			if (logger.isTraceEnabled()) logger.trace("... after processing request, returning response code: " + response.getStatus());
+		} catch (Exception e) {
 			logger.error("Server Error occurred in ProductQueryController", e);
 			throw new ServletException(e);
 		}

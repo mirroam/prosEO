@@ -5,10 +5,10 @@
  */
 package de.dlr.proseo.ingestor;
 
+import java.util.Base64;
+
 import javax.sql.DataSource;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -22,6 +22,8 @@ import org.springframework.security.core.userdetails.jdbc.JdbcDaoImpl;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
+import de.dlr.proseo.logging.logger.ProseoLogger;
+import de.dlr.proseo.logging.messages.IngestorMessage;
 import de.dlr.proseo.model.enums.UserRole;
 
 /**
@@ -38,8 +40,30 @@ public class IngestorSecurityConfig extends WebSecurityConfigurerAdapter {
 	private DataSource dataSource;
 	
 	/** A logger for this class */
-	private static Logger logger = LoggerFactory.getLogger(IngestorSecurityConfig.class);
-	
+	private static ProseoLogger logger = new ProseoLogger(IngestorSecurityConfig.class);
+		
+	/**
+	 * Parse an HTTP authentication header into username and password
+	 * @param authHeader the authentication header to parse
+	 * @return a string array containing the username and the password
+	 * @throws IllegalArgumentException if the authentication header cannot be parsed
+	 */
+	public String[] parseAuthenticationHeader(String authHeader) throws IllegalArgumentException {
+		if (logger.isTraceEnabled()) logger.trace(">>> parseAuthenticationHeader({})", authHeader);
+
+		if (null == authHeader) {
+			String message = logger.log(IngestorMessage.AUTH_MISSING_OR_INVALID, authHeader);
+			throw new IllegalArgumentException (message);
+		}
+		String[] authParts = authHeader.split(" ");
+		if (2 != authParts.length || !"Basic".equals(authParts[0])) {
+			String message = logger.log(IngestorMessage.AUTH_MISSING_OR_INVALID, authHeader);
+			throw new IllegalArgumentException (message);
+		}
+		String[] userPassword = (new String(Base64.getDecoder().decode(authParts[1]))).split(":"); // guaranteed to work as per BasicAuth specification
+		return userPassword;
+	}
+
 	/**
 	 * Set the Ingestor security options
 	 * 
@@ -51,7 +75,9 @@ public class IngestorSecurityConfig extends WebSecurityConfigurerAdapter {
 			.httpBasic()
 				.and()
 			.authorizeRequests()
-				.antMatchers(HttpMethod.GET, "/**/products", "/**/products/*", "/**/ingest/*/*").hasAnyRole(
+				.antMatchers("/**/actuator/health").permitAll()
+				.antMatchers(HttpMethod.GET, "/**/products", "/**/products/*", "/**/products/*/*", "/**/products/*/*/*", "/**/ingest/*/*")
+					.hasAnyRole(
 						UserRole.PRODUCT_READER.toString(),
 						UserRole.PRODUCT_READER_RESTRICTED.toString(),
 						UserRole.PRODUCT_READER_ALL.toString())
@@ -70,7 +96,7 @@ public class IngestorSecurityConfig extends WebSecurityConfigurerAdapter {
 	 */
 	@Autowired
 	public void initialize(AuthenticationManagerBuilder builder) throws Exception {
-		logger.info("Initializing authentication from user details service ");
+		logger.log(IngestorMessage.INITIALIZE_AUTHENTICATION);
 
 		builder.userDetailsService(userDetailsService());
 	}
@@ -92,7 +118,7 @@ public class IngestorSecurityConfig extends WebSecurityConfigurerAdapter {
 	 */
 	@Bean
 	public UserDetailsService userDetailsService() {
-		logger.info("Initializing user details service from datasource " + dataSource);
+		logger.log(IngestorMessage.INITIALIZE_USER_INFO, dataSource);
 
 		JdbcDaoImpl jdbcDaoImpl = new JdbcDaoImpl();
 		jdbcDaoImpl.setDataSource(dataSource);

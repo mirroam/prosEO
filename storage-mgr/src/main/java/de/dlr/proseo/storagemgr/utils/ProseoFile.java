@@ -1,6 +1,7 @@
 package de.dlr.proseo.storagemgr.utils;
 
 import java.io.InputStream;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 
 import org.apache.commons.io.FilenameUtils;
@@ -34,7 +35,9 @@ public abstract class ProseoFile {
 	 */
 	protected String pathInfo;
 	
-	/** File name */
+	/**
+	 * File name 
+	 */
 	protected String fileName;
 	
 	/**
@@ -126,6 +129,9 @@ public abstract class ProseoFile {
 	 * (if the relative path does not end on '/')
 	 */
 	protected void buildFileName() {
+		
+		if (logger.isTraceEnabled()) logger.trace(">>> buildFileName()");
+		
 		fileName = "";	
 		if (relPath != null) {
 			if (!relPath.endsWith("/")) {
@@ -146,6 +152,9 @@ public abstract class ProseoFile {
 	 * @return Relative path + file name
 	 */
 	public String getRelPathAndFile() {
+		
+		if (logger.isTraceEnabled()) logger.trace(">>> getRelPathAndFile()");
+
 		if (relPath.endsWith("/") || relPath.isEmpty()) {
 			return relPath + fileName;
 		} else {
@@ -166,6 +175,9 @@ public abstract class ProseoFile {
 	 * @return Extension of file name or an empty string, if the file name has no extension
 	 */
 	public String getExtension() {
+		
+		if (logger.isTraceEnabled()) logger.trace(">>> getExtension()");
+
 		if ((fileName == null) || fileName.isEmpty()) {
 			return "";
 		} else {
@@ -181,19 +193,26 @@ public abstract class ProseoFile {
 	 * @return The new file object or null, if the operation failed
 	 */
 	public static ProseoFile fromPathInfo(String pathInfo, StorageManagerConfiguration cfg) {
-		if (pathInfo != null) {
+		
+		if (logger.isTraceEnabled()) logger.trace(">>> fromPathInfo({}, {})", pathInfo, cfg);
+
+		if (pathInfo == null) {
+			logger.warn("pathInfo not set");
+		} else {
 			String aPath = pathInfo.trim();
 			// Find storage type
 			if (aPath.startsWith("s3:") || aPath.startsWith("S3:")) {
 				return new ProseoFileS3(aPath, true, cfg);
 			} else if (aPath.startsWith("alluxio:")) {
 				return new ProseoFileAlluxio(aPath, true, cfg);
-			} else if (aPath.startsWith("/")) {
+			} else {
+				if (!aPath.startsWith("/")) {
+					aPath = Paths.get(aPath).toAbsolutePath().toString();
+				}
 				return new ProseoFilePosix(aPath, true, cfg);
 			}
-			logger.warn("Unknown FS type in path: {}", pathInfo);
+			//logger.warn("Unknown FS type in path: {}", pathInfo);
 		}
-		logger.warn("pathInfo not set");
 		return null;
 	}
 	
@@ -206,6 +225,9 @@ public abstract class ProseoFile {
 	 * @return The new file object or null, if the operation failed
 	 */
 	public static ProseoFile fromType(StorageType aType, String pathInfo, StorageManagerConfiguration cfg) {
+		
+		if (logger.isTraceEnabled()) logger.trace(">>> fromType({}, {}, {})", aType, pathInfo, cfg);
+		
 		if (pathInfo != null) {
 			String aPath = pathInfo.trim();
 			// Find storage type
@@ -235,6 +257,9 @@ public abstract class ProseoFile {
 	 * @return The new file object or null, if the operation failed
 	 */
 	public static ProseoFile fromTypeFullPath(StorageType aType, String pathInfo, StorageManagerConfiguration cfg) {
+		
+		if (logger.isTraceEnabled()) logger.trace(">>> fromTypeFullPath({}, {}, {})", aType, pathInfo, cfg);
+		
 		if (pathInfo != null) {
 			String aPath = pathInfo.trim();
 			// Find storage type
@@ -265,6 +290,9 @@ public abstract class ProseoFile {
 	 * @return the new file object or null, if the operation failed
 	 */
 	public static ProseoFile fromTypeAndBucket(StorageType aType, String bucket, String pathInfo, StorageManagerConfiguration cfg) {
+		
+		if (logger.isTraceEnabled()) logger.trace(">>> fromTypeAndBucket({}, {}, {})", aType, bucket, pathInfo, cfg);
+		
 		if (pathInfo != null) {
 			String aPath = pathInfo.trim();
 			// Find storage type

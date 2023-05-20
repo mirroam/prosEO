@@ -76,14 +76,18 @@ public class ConfigurationFile {
 
 	@Override
 	public boolean equals(Object obj) {
+		// Object identity
 		if (this == obj)
 			return true;
-		if (!super.equals(obj))
-			return false;
+		
+		// Same database object
+		if (super.equals(obj))
+			return true;
+		
 		if (!(obj instanceof ConfigurationFile))
 			return false;
 		ConfigurationFile other = (ConfigurationFile) obj;
-		return Objects.equals(fileName, other.fileName) && Objects.equals(fileVersion, other.fileVersion);
+		return Objects.equals(fileName, other.getFileName()) && Objects.equals(fileVersion, other.getFileVersion());
 	}
 
 	@Override

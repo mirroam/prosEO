@@ -3,8 +3,6 @@ package de.dlr.proseo.ui.gui;
 import java.util.ArrayList;
 import java.util.List;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.reactive.ReactorClientHttpConnector;
@@ -14,12 +12,16 @@ import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.client.RestClientResponseException;
 import org.springframework.web.context.request.async.DeferredResult;
 import org.springframework.web.reactive.function.client.ClientResponse;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClient.Builder;
 
+import de.dlr.proseo.logging.logger.ProseoLogger;
+import de.dlr.proseo.logging.messages.UIMessage;
 import de.dlr.proseo.ui.backend.ServiceConfiguration;
+import de.dlr.proseo.ui.backend.ServiceConnection;
 import io.netty.handler.codec.http.HttpResponseStatus;
 import reactor.core.publisher.Mono;
 import reactor.netty.http.client.HttpClient;
@@ -27,15 +29,16 @@ import reactor.netty.http.client.HttpClient;
 public class GUIOrbitController extends GUIBaseController {
 
 	/** A logger for this class */
-	private static Logger logger = LoggerFactory.getLogger(GUIConfigurationController.class);
+	private static ProseoLogger logger = new ProseoLogger(GUIConfigurationController.class);
 
-	/** The GUI configuration */
-	@Autowired
-	private GUIConfiguration config;
-	
 	/** The configuration object for the prosEO backend services */
 	@Autowired
 	private ServiceConfiguration serviceConfig;
+	
+	/** The connector service to the prosEO backend services */
+	@Autowired
+	private ServiceConnection serviceConnection;
+	
 			    
 	    @RequestMapping(value = "/orbit-show")
 	    public String showOrbit() {
@@ -47,6 +50,12 @@ public class GUIOrbitController extends GUIBaseController {
 		 * Retrieve the orbits of a spacecraft
 		 * 
 		 * @param spacecraft The spacecraft identifier
+		 * @param startTimeFrom Select start time from
+		 * @param startTimeTo Select stop time until
+		 * @param numberFrom Select orbit number from
+		 * @param numberTo Select orbit number to
+		 * @param fromIndex Paging start  
+		 * @param toIndex Paging stop
 		 * @param sortby The sort column
 		 * @param up The sort direction (true for up)
 		 * @param model The model to hold the data
@@ -56,38 +65,81 @@ public class GUIOrbitController extends GUIBaseController {
 		@RequestMapping(value = "/orbits/get")
 		public DeferredResult<String> getOrbits(
 				@RequestParam(required = false, value = "spacecraft") String spacecraft,
+				@RequestParam(required = false, value = "startTimeFrom") String startTimeFrom,
+				@RequestParam(required = false, value = "startTimeTo") String startTimeTo,
+				@RequestParam(required = false, value = "numberFrom") Long numberFrom,
+				@RequestParam(required = false, value = "numberTo") Long numberTo,
+				@RequestParam(required = false, value = "recordFrom") Long fromIndex,
+				@RequestParam(required = false, value = "recordTo") Long toIndex,
 				@RequestParam(required = false, value = "sortby") String sortby,
 				@RequestParam(required = false, value = "up") Boolean up, Model model) {
 			if (logger.isTraceEnabled())
 				logger.trace(">>> getOrbits(model)");
-			Mono<ClientResponse> mono = get(spacecraft);
+			Long from = null;
+			Long to = null;
+			if (fromIndex != null && fromIndex >= 0) {
+				from = fromIndex;
+			} else {
+				from = (long) 0;
+			}
+			Long count = countOrbits(spacecraft);
+			if (toIndex != null && from != null && toIndex > from) {
+				to = toIndex;
+			} else if (from != null) {
+				to = count;
+			}
+			Long pageSize = to - from;
+			Long deltaPage = (long) ((count % pageSize)==0?0:1);
+			Long pages = (count / pageSize) + deltaPage;
+			Long page = (from / pageSize) + 1;
+			
+			Mono<ClientResponse> mono = get(spacecraft, startTimeFrom, startTimeTo, numberFrom, numberTo, from, to);
 			DeferredResult<String> deferredResult = new DeferredResult<String>();
 			List<Object> orbits = new ArrayList<>();
-			mono.subscribe(clientResponse -> {
+
+			mono.doOnError(e -> {
+				model.addAttribute("errormsg", e.getMessage());
+				deferredResult.setResult("orbit-show :: #errormsg");
+			})
+		 	.subscribe(clientResponse -> {
 				logger.trace("Now in Consumer::accept({})", clientResponse);
-				if (clientResponse.statusCode().is5xxServerError()) {
-					logger.trace(">>>Server side error (HTTP status 500)");
-					model.addAttribute("errormsg", "Server side error (HTTP status 500)");
-					deferredResult.setResult("orbit-show :: #orbitcontent");
-					logger.trace(">>DEFERREDRES 500: {}", deferredResult.getResult());
-				} else if (clientResponse.statusCode().is4xxClientError()) {
-					logger.trace(">>>Warning Header: {}", clientResponse.headers().asHttpHeaders().getFirst("Warning"));
-					model.addAttribute("errormsg", clientResponse.headers().asHttpHeaders().getFirst("Warning"));
-					deferredResult.setResult("orbit-show :: #orbitcontent");
-					logger.trace(">>DEFERREDRES 4xx: {}", deferredResult.getResult());
-				} else if (clientResponse.statusCode().is2xxSuccessful()) {
+				if (clientResponse.statusCode().is2xxSuccessful()) {
 					clientResponse.bodyToMono(List.class).subscribe(pcList -> {
 						orbits.addAll(pcList);
 					
 						model.addAttribute("orbits", orbits);
+						model.addAttribute("count", count);
+						model.addAttribute("pageSize", pageSize);
+						model.addAttribute("pageCount", pages);
+						model.addAttribute("page", page);
+						List<Long> showPages = new ArrayList<Long>();
+						Long start = Math.max(page - 4, 1);
+						Long end = Math.min(page + 4, pages);
+						if (page < 5) {
+							end = Math.min(end + (5 - page), pages);
+						}
+						if (pages - page < 5) {
+							start = Math.max(start - (4 - (pages - page)), 1);
+						}
+						for (Long i = start; i <= end; i++) {
+							showPages.add(i);
+						}
+						model.addAttribute("showPages", showPages);
 						logger.trace(model.toString() + "MODEL TO STRING");
 						logger.trace(">>>>MONO" + orbits.toString());
 						deferredResult.setResult("orbit-show :: #orbitcontent");
 						logger.trace(">>DEFERREDRES: {}", deferredResult.getResult());
 					});
+				} else {
+					handleHTTPError(clientResponse, model);
+					deferredResult.setResult("orbit-show :: #errormsg");
 				}
 				logger.trace(">>>>MODEL" + model.toString());
 
+			},
+			e -> {
+				model.addAttribute("errormsg", e.getMessage());
+				deferredResult.setResult("orbit-show :: #errormsg");
 			});
 			logger.trace(model.toString() + "MODEL TO STRING");
 			logger.trace(">>>>MONO" + orbits.toString());
@@ -96,13 +148,39 @@ public class GUIOrbitController extends GUIBaseController {
 			return deferredResult;
 		}
 
-		private Mono<ClientResponse> get(String spacecraft) {
+		private Mono<ClientResponse> get(String spacecraft, String startTimeFrom, String startTimeTo, Long numberFrom, Long numberTo, Long from, Long to) {
 			GUIAuthenticationToken auth = (GUIAuthenticationToken)SecurityContextHolder.getContext().getAuthentication();
-			String mission = auth.getMission();
 			String uri = serviceConfig.getOrderManagerUrl() + "/orbits";
+			String divider = "?";
 			if (spacecraft != null) {
-				uri += "?spacecraftCode=" + spacecraft;
+				uri += divider + "spacecraftCode=" + spacecraft;
+				divider ="&";
 			}
+			if (startTimeFrom != null) {
+				uri += divider + "startTimeFrom=" + startTimeFrom;
+				divider ="&";
+			}
+			if (startTimeTo != null) {
+				uri += divider + "startTimeTo=" + startTimeTo;
+				divider ="&";
+			}
+			if (numberFrom != null) {
+				uri += divider + "orbitNumberFrom=" + numberFrom;
+				divider ="&";
+			}
+			if (numberTo != null) {
+				uri += divider + "orbitNumberTo=" + numberTo;
+				divider ="&";
+			}
+			if (from != null) {
+				uri += divider + "recordFrom=" + from;
+				divider ="&";
+			}
+			if (to != null) {
+				uri += divider + "recordTo=" + to;
+				divider ="&";
+			}
+			uri += divider + "orderBy=orbitNumber ASC,startTime ASC";
 			logger.trace("URI " + uri);
 			Builder webclient = WebClient.builder().clientConnector(new ReactorClientHttpConnector(
 					HttpClient.create().followRedirect((req, res) -> {
@@ -116,7 +194,45 @@ public class GUIOrbitController extends GUIBaseController {
 			return  webclient.build().get().uri(uri).headers(headers -> headers.setBasicAuth(auth.getProseoName(), auth.getPassword())).accept(MediaType.APPLICATION_JSON).exchange();
 
 		}
-	   
+
+	    private Long countOrbits(String spacecraft)  {	    	
+			GUIAuthenticationToken auth = (GUIAuthenticationToken)SecurityContextHolder.getContext().getAuthentication();
+			String uri = "/orbits/count";
+			String divider = "?";
+			if (spacecraft != null) {
+				uri += divider + "spacecraftCode=" + spacecraft;
+				divider ="&";
+			}
+			Long result = (long) -1;
+			try {
+				String resStr = serviceConnection.getFromService(serviceConfig.getOrderManagerUrl(),
+						uri, String.class, auth.getProseoName(), auth.getPassword());
+
+				if (resStr != null && resStr.length() > 0) {
+					result = Long.valueOf(resStr);
+				}
+			} catch (RestClientResponseException e) {
+				String message = null;
+				switch (e.getRawStatusCode()) {
+				case org.apache.http.HttpStatus.SC_NOT_FOUND:
+					message = ProseoLogger.format(UIMessage.NO_MISSIONS_FOUND);
+					break;
+				case org.apache.http.HttpStatus.SC_UNAUTHORIZED:
+				case org.apache.http.HttpStatus.SC_FORBIDDEN:
+					message = ProseoLogger.format(UIMessage.NOT_AUTHORIZED, "null", "null", "null");
+					break;
+				default:
+					message = ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage());
+				}
+				System.err.println(message);
+				return result;
+			} catch (RuntimeException e) {
+				System.err.println(ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage()));
+				return result;
+			}
+			
+	        return result;
+	    }
 	}
 
 

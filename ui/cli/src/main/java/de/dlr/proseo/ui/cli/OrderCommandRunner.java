@@ -5,13 +5,12 @@
  */
 package de.dlr.proseo.ui.cli;
 
-import static de.dlr.proseo.ui.backend.UIMessages.*;
-
 import java.io.File;
 import java.io.IOException;
 import java.net.URLEncoder;
 import java.nio.charset.Charset;
 import java.time.DateTimeException;
+import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.Arrays;
@@ -19,8 +18,6 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
@@ -29,10 +26,13 @@ import org.springframework.web.client.RestClientResponseException;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import de.dlr.proseo.logging.logger.ProseoLogger;
+import de.dlr.proseo.logging.messages.UIMessage;
 import de.dlr.proseo.model.enums.OrderSlicingType;
 import de.dlr.proseo.model.enums.OrderState;
 import de.dlr.proseo.model.rest.model.RestOrbitQuery;
 import de.dlr.proseo.model.rest.model.RestOrder;
+import de.dlr.proseo.model.util.OrbitTimeFormatter;
 import de.dlr.proseo.ui.backend.ServiceConfiguration;
 import de.dlr.proseo.ui.backend.ServiceConnection;
 import de.dlr.proseo.ui.backend.LoginManager;
@@ -66,9 +66,15 @@ public class OrderCommandRunner {
 	private static final String CMD_CLOSE = "close";
 	private static final String CMD_RESET = "reset";
 
+	private static final String OPTION_FORCE = "force";
+	private static final String OPTION_DELETE_ATTRIBUTES = "delete-attributes";
+	private static final String OPTION_VERBOSE = "verbose";
+	private static final String OPTION_FORMAT = "format";
+	private static final String OPTION_FILE = "file";
+
 	private static final String MSG_CHECKING_FOR_MISSING_MANDATORY_ATTRIBUTES = "Checking for missing mandatory attributes ...";
 	private static final String PROMPT_IDENTIFIER = "Order identifier (empty field cancels): ";
-	private static final String PROMPT_SLICING_TYPE = "Slicing type (O)rbit, C)alendar day, T)ime slice; empty field cancels): ";
+	private static final String PROMPT_SLICING_TYPE = "Slicing type (O)rbit, C)alendar day, calendar M)onth, calendar Y)ear, T)ime slice, N)one; empty field cancels): ";
 	private static final String PROMPT_SLICE_DURATION = "Time slice duration (empty field cancels): ";
 	private static final String PROMPT_START_TIME = "Order time interval start (YYYY-MM-DDTHH:MM:SS; emtpy field cancels): ";
 	private static final String PROMPT_STOP_TIME = "Order time interval end (YYYY-MM-DDTHH:MM:SS; emtpy field cancels): ";
@@ -85,6 +91,7 @@ public class OrderCommandRunner {
 	private static final String URI_PATH_ORDER_CANCEL = "/orders/cancel";
 	private static final String URI_PATH_ORDER_RETRY = "/orders/retry";
 	private static final String URI_PATH_ORDER_RESET = "/orders/reset";
+	private static final String URI_PATH_ORDER_CLOSE = "/orders/close";
 	private static final String URI_PATH_JOBS = "/jobs";
 	
 	private static final String ORDERS = "orders";
@@ -107,7 +114,7 @@ public class OrderCommandRunner {
 	private ServiceConnection serviceConnection;
 	
 	/** A logger for this class */
-	private static Logger logger = LoggerFactory.getLogger(OrderCommandRunner.class);
+	private static ProseoLogger logger = new ProseoLogger(OrderCommandRunner.class);
 	
 	/**
 	 * Retrieve a processing order by identifier, which is the first parameter of the given command.
@@ -122,7 +129,7 @@ public class OrderCommandRunner {
 		/* Get order ID from command parameters */
 		if (command.getParameters().isEmpty()) {
 			// No identifying value given
-			System.err.println(uiMsg(MSG_ID_NO_IDENTIFIER_GIVEN));
+			System.err.println(ProseoLogger.format(UIMessage.NO_IDENTIFIER_GIVEN));
 			return null;
 		}
 		String orderIdentifier = command.getParameters().get(0).getValue();
@@ -144,19 +151,21 @@ public class OrderCommandRunner {
 			String message = null;
 			switch (e.getRawStatusCode()) {
 			case org.apache.http.HttpStatus.SC_NOT_FOUND:
-				message = uiMsg(MSG_ID_ORDER_NOT_FOUND, orderIdentifier);
+				message = ProseoLogger.format(UIMessage.ORDER_NOT_FOUND, orderIdentifier);
 				break;
 			case org.apache.http.HttpStatus.SC_UNAUTHORIZED:
 			case org.apache.http.HttpStatus.SC_FORBIDDEN:
-				message = uiMsg(MSG_ID_NOT_AUTHORIZED, loginManager.getUser(), ORDERS, loginManager.getMission());
+				message = (null == e.getStatusText() ?
+						ProseoLogger.format(UIMessage.NOT_AUTHORIZED, loginManager.getUser(), ORDERS, loginManager.getMission()) :
+						e.getStatusText());
 				break;
 			default:
-				message = uiMsg(MSG_ID_EXCEPTION, e.getMessage());
+				message = ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage());
 			}
 			System.err.println(message);
 			return null;
 		} catch (RuntimeException e) {
-			System.err.println(uiMsg(MSG_ID_EXCEPTION, e.getMessage()));
+			System.err.println(ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage()));
 			return null;
 		}
 	}
@@ -175,10 +184,10 @@ public class OrderCommandRunner {
 		String orderFileFormat = CLIUtil.FILE_FORMAT_JSON;
 		for (ParsedOption option: createCommand.getOptions()) {
 			switch(option.getName()) {
-			case "file":
+			case OPTION_FILE:
 				orderFile = new File(option.getValue());
 				break;
-			case "format":
+			case OPTION_FORMAT:
 				orderFileFormat = option.getValue().toUpperCase();
 				break;
 			}
@@ -192,7 +201,7 @@ public class OrderCommandRunner {
 			try {
 				restOrder = CLIUtil.parseObjectFile(orderFile, orderFileFormat, RestOrder.class);
 			} catch (IllegalArgumentException | IOException e) {
-				System.err.println(uiMsg(MSG_ID_EXCEPTION, e.getMessage()));
+				System.err.println(ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage()));
 				return;
 			}
 		}
@@ -208,7 +217,7 @@ public class OrderCommandRunner {
 				try {
 					CLIUtil.setAttribute(restOrder, param.getValue());
 				} catch (Exception e) {
-					System.err.println(uiMsg(MSG_ID_EXCEPTION, e.getMessage()));
+					System.err.println(ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage()));
 					return;
 				}
 			}
@@ -231,25 +240,29 @@ public class OrderCommandRunner {
 			System.out.print(PROMPT_IDENTIFIER);
 			String response = System.console().readLine();
 			if (response.isBlank()) {
-				System.out.println(uiMsg(MSG_ID_OPERATION_CANCELLED));
+				System.out.println(ProseoLogger.format(UIMessage.OPERATION_CANCELLED));
 				return;
 			}
 			restOrder.setIdentifier(response);
 		}
 		// Get order slicing type
 		while (!Arrays.asList(OrderSlicingType.ORBIT.toString(), OrderSlicingType.CALENDAR_DAY.toString(), 
-				OrderSlicingType.TIME_SLICE.toString()).contains(restOrder.getSlicingType())) {
+				OrderSlicingType.CALENDAR_MONTH.toString(), OrderSlicingType.CALENDAR_YEAR.toString(),
+				OrderSlicingType.TIME_SLICE.toString(), OrderSlicingType.NONE.toString()).contains(restOrder.getSlicingType())) {
 			System.out.print(PROMPT_SLICING_TYPE);
 			String response = System.console().readLine().toUpperCase();
 			switch (response) {
 			case "O":	restOrder.setSlicingType(OrderSlicingType.ORBIT.toString()); break;
 			case "C":	restOrder.setSlicingType(OrderSlicingType.CALENDAR_DAY.toString()); break;
+			case "M":	restOrder.setSlicingType(OrderSlicingType.CALENDAR_MONTH.toString()); break;
+			case "Y":	restOrder.setSlicingType(OrderSlicingType.CALENDAR_YEAR.toString()); break;
 			case "T":	restOrder.setSlicingType(OrderSlicingType.TIME_SLICE.toString()); break;
+			case "N":	restOrder.setSlicingType(OrderSlicingType.NONE.toString()); break;
 			case "":
-				System.out.println(uiMsg(MSG_ID_OPERATION_CANCELLED));
+				System.out.println(ProseoLogger.format(UIMessage.OPERATION_CANCELLED));
 				return;
 			default:
-				System.err.println(uiMsg(MSG_ID_INVALID_SLICING_TYPE, response));
+				System.err.println(ProseoLogger.format(UIMessage.INVALID_SLICING_TYPE, response));
 			}
 		}
 		// For TIME_SLICE orders get slice duration
@@ -258,42 +271,45 @@ public class OrderCommandRunner {
 			System.out.print(PROMPT_SLICE_DURATION);
 			String response = System.console().readLine();
 			if (response.isBlank()) {
-				System.out.println(uiMsg(MSG_ID_OPERATION_CANCELLED));
+				System.out.println(ProseoLogger.format(UIMessage.OPERATION_CANCELLED));
 				return;
 			}
 			try {
 				restOrder.setSliceDuration(Long.parseLong(response));
 			} catch (NumberFormatException e) {
-				System.err.println(uiMsg(MSG_ID_INVALID_SLICE_DURATION, response));
+				System.err.println(ProseoLogger.format(UIMessage.INVALID_SLICE_DURATION, response));
 			}
 		}
-		// For TIME_SLICE and CALENDAR_DAY orders, get start and end time
+		// For TIME_SLICE and CALENDAR_DAY/MONTH/YEAR orders, get start and end time
 		if (OrderSlicingType.TIME_SLICE.toString().equals(restOrder.getSlicingType()) 
-				|| OrderSlicingType.CALENDAR_DAY.toString().equals(restOrder.getSlicingType())) {
+				|| OrderSlicingType.CALENDAR_DAY.toString().equals(restOrder.getSlicingType())
+				|| OrderSlicingType.CALENDAR_MONTH.toString().equals(restOrder.getSlicingType())
+				|| OrderSlicingType.CALENDAR_YEAR.toString().equals(restOrder.getSlicingType())
+				|| OrderSlicingType.NONE.toString().equals(restOrder.getSlicingType())) {
 			while (null == restOrder.getStartTime()) {
 				System.out.print(PROMPT_START_TIME);
 				String response = System.console().readLine();
 				if (response.isBlank()) {
-					System.out.println(uiMsg(MSG_ID_OPERATION_CANCELLED));
+					System.out.println(ProseoLogger.format(UIMessage.OPERATION_CANCELLED));
 					return;
 				}
 				try {
-					restOrder.setStartTime(java.util.Date.from(CLIUtil.parseDateTime(response)));
+					restOrder.setStartTime(OrbitTimeFormatter.format(CLIUtil.parseDateTime(response)));
 				} catch (DateTimeException e) {
-					System.err.println(uiMsg(MSG_ID_INVALID_TIME, response));
+					System.err.println(ProseoLogger.format(UIMessage.INVALID_TIME, response));
 				}
 			}
 			while (null == restOrder.getStopTime()) {
 				System.out.print(PROMPT_STOP_TIME);
 				String response = System.console().readLine();
 				if (response.isBlank()) {
-					System.out.println(uiMsg(MSG_ID_OPERATION_CANCELLED));
+					System.out.println(ProseoLogger.format(UIMessage.OPERATION_CANCELLED));
 					return;
 				}
 				try {
-					restOrder.setStopTime(java.util.Date.from(CLIUtil.parseDateTime(response)));
+					restOrder.setStopTime(OrbitTimeFormatter.format(CLIUtil.parseDateTime(response)));
 				} catch (DateTimeException e) {
-					System.err.println(uiMsg(MSG_ID_INVALID_TIME, response));
+					System.err.println(ProseoLogger.format(UIMessage.INVALID_TIME, response));
 				}
 			} 
 		}
@@ -304,13 +320,13 @@ public class OrderCommandRunner {
 				System.out.print(PROMPT_SPACECRAFT);
 				String spacecraft = System.console().readLine();
 				if ("".equals(spacecraft)) {
-					System.out.println(uiMsg(MSG_ID_OPERATION_CANCELLED));
+					System.out.println(ProseoLogger.format(UIMessage.OPERATION_CANCELLED));
 					return;
 				}
 				System.out.print(PROMPT_ORBIT_LIST);
 				String orbitList = System.console().readLine();
 				if ("".equals(orbitList)) {
-					System.out.println(uiMsg(MSG_ID_OPERATION_CANCELLED));
+					System.out.println(ProseoLogger.format(UIMessage.OPERATION_CANCELLED));
 					return;
 				}
 				String[] orbits = orbitList.split(",");
@@ -326,7 +342,7 @@ public class OrderCommandRunner {
 							orbitNumberTo = orbitNumberFrom;
 						}
 					} catch (NumberFormatException e) {
-						System.err.println(uiMsg(MSG_ID_INVALID_ORBIT_NUMBER, orbits[i]));
+						System.err.println(ProseoLogger.format(UIMessage.INVALID_ORBIT_NUMBER, orbits[i]));
 						continue ORBITS;
 					}
 					RestOrbitQuery query = new RestOrbitQuery();
@@ -342,7 +358,7 @@ public class OrderCommandRunner {
 			System.out.print(PROMPT_PROCESSING_MODE);
 			String response = System.console().readLine();
 			if (response.isBlank()) {
-				System.out.println(uiMsg(MSG_ID_OPERATION_CANCELLED));
+				System.out.println(ProseoLogger.format(UIMessage.OPERATION_CANCELLED));
 				return;
 			}
 			restOrder.setProcessingMode(response);
@@ -352,7 +368,7 @@ public class OrderCommandRunner {
 			System.out.print(PROMPT_FILE_CLASS);
 			String response = System.console().readLine();
 			if (response.isBlank()) {
-				System.out.println(uiMsg(MSG_ID_OPERATION_CANCELLED));
+				System.out.println(ProseoLogger.format(UIMessage.OPERATION_CANCELLED));
 				return;
 			}
 			restOrder.setOutputFileClass(response);
@@ -362,7 +378,7 @@ public class OrderCommandRunner {
 			System.out.print(PROMPT_PRODUCT_CLASSES);
 			String response = System.console().readLine();
 			if (response.isBlank()) {
-				System.out.println(uiMsg(MSG_ID_OPERATION_CANCELLED));
+				System.out.println(ProseoLogger.format(UIMessage.OPERATION_CANCELLED));
 				return;
 			}
 			restOrder.setRequestedProductClasses(Arrays.asList(response.split(",")));
@@ -377,25 +393,26 @@ public class OrderCommandRunner {
 			String message = null;
 			switch (e.getRawStatusCode()) {
 			case org.apache.http.HttpStatus.SC_BAD_REQUEST:
-				message = uiMsg(MSG_ID_ORDER_DATA_INVALID,  e.getMessage());
+				message = ProseoLogger.format(UIMessage.ORDER_DATA_INVALID,  e.getStatusText());
 				break;
 			case org.apache.http.HttpStatus.SC_UNAUTHORIZED:
 			case org.apache.http.HttpStatus.SC_FORBIDDEN:
-				message = uiMsg(MSG_ID_NOT_AUTHORIZED, loginManager.getUser(), ORDERS, loginManager.getMission());
+				message = (null == e.getStatusText() ?
+						ProseoLogger.format(UIMessage.NOT_AUTHORIZED, loginManager.getUser(), ORDERS, loginManager.getMission()) :
+						e.getStatusText());
 				break;
 			default:
-				message = uiMsg(MSG_ID_EXCEPTION, e.getMessage());
+				message = ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage());
 			}
 			System.err.println(message);
 			return;
 		} catch (RuntimeException e) {
-			System.err.println(uiMsg(MSG_ID_EXCEPTION, e.getMessage()));
+			System.err.println(ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage()));
 			return;
 		}
 		
 		/* Report success, giving newly assigned order ID */
-		String message = uiMsg(MSG_ID_ORDER_CREATED, restOrder.getIdentifier(), restOrder.getId());
-		logger.info(message);
+		String message = logger.log(UIMessage.ORDER_CREATED, restOrder.getIdentifier(), restOrder.getId());
 		System.out.println(message);
 	}
 	
@@ -409,10 +426,14 @@ public class OrderCommandRunner {
 		
 		/* Check command options */
 		String orderOutputFormat = CLIUtil.FILE_FORMAT_YAML;
+		boolean isVerbose = false;
 		for (ParsedOption option: showCommand.getOptions()) {
 			switch(option.getName()) {
-			case "format":
+			case OPTION_FORMAT:
 				orderOutputFormat = option.getValue().toUpperCase();
+				break;
+			case OPTION_VERBOSE:
+				isVerbose = true;
 				break;
 			}
 		}
@@ -427,10 +448,15 @@ public class OrderCommandRunner {
 					if ("from".equals(option.getName())) {
 						requestURI += "&startTimeFrom=" + formatter.format(CLIUtil.parseDateTime(option.getValue()));
 					} else if ("to".equals(option.getName())) {
-						requestURI += "&startTimeTo=" + formatter.format(CLIUtil.parseDateTime(option.getValue()));
+						Instant startTimeTo = CLIUtil.parseDateTime(option.getValue());
+						if (0 < startTimeTo.getNano()) {
+							// API only accepts full second, therefore round up to next full second
+							startTimeTo = startTimeTo.plusSeconds(1);
+						}
+						requestURI += "&startTimeTo=" + formatter.format(startTimeTo);
 					}
 				} catch (DateTimeException e) {
-					System.err.println(uiMsg(MSG_ID_INVALID_TIME, option.getValue()));
+					System.err.println(ProseoLogger.format(UIMessage.INVALID_TIME, option.getValue()));
 					return;
 				}
 			}
@@ -448,31 +474,51 @@ public class OrderCommandRunner {
 			String message = null;
 			switch (e.getRawStatusCode()) {
 			case org.apache.http.HttpStatus.SC_NOT_FOUND:
-				message = uiMsg(MSG_ID_NO_ORDERS_FOUND);
+				message = ProseoLogger.format(UIMessage.NO_ORDERS_FOUND);
 				break;
 			case org.apache.http.HttpStatus.SC_UNAUTHORIZED:
 			case org.apache.http.HttpStatus.SC_FORBIDDEN:
-				message = uiMsg(MSG_ID_NOT_AUTHORIZED, loginManager.getUser(), ORDERS, loginManager.getMission());
+				message = (null == e.getStatusText() ?
+						ProseoLogger.format(UIMessage.NOT_AUTHORIZED, loginManager.getUser(), ORDERS, loginManager.getMission()) :
+						e.getStatusText());
 				break;
 			default:
-				message = uiMsg(MSG_ID_EXCEPTION, e.getMessage());
+				message = ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage());
 			}
 			System.err.println(message);
 			return;
 		} catch (RuntimeException e) {
-			System.err.println(uiMsg(MSG_ID_EXCEPTION, e.getMessage()));
+			System.err.println(ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage()));
 			return;
 		}
 		
-		/* Display the order(s) found */
-		try {
-			CLIUtil.printObject(System.out, resultList, orderOutputFormat);
-		} catch (IllegalArgumentException e) {
-			System.err.println(e.getMessage());
-			return;
-		} catch (IOException e) {
-			System.err.println(uiMsg(MSG_ID_EXCEPTION, e.getMessage()));
-			return;
+		if (isVerbose) {
+			/* Display the order(s) found */
+			try {
+				CLIUtil.printObject(System.out, resultList, orderOutputFormat);
+			} catch (IllegalArgumentException e) {
+				System.err.println(e.getMessage());
+				return;
+			} catch (IOException e) {
+				System.err.println(ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage()));
+				return;
+			} 
+		} else {
+			// Must be a list of orders
+			String listFormat = "%-30s %-38s %-26s %-26s %-6s %s";
+			System.out.println(String.format(listFormat, "Identifier", "UUID", "Sensing Start", "Sensing Stop", "Mode", "Order State"));
+			for (Object resultObject: (new ObjectMapper()).convertValue(resultList, List.class)) {
+				if (resultObject instanceof Map) {
+					Map<?, ?> resultMap = (Map<?, ?>) resultObject;
+					System.out.println(String.format(listFormat,
+							resultMap.get("identifier"),
+							resultMap.get("uuid"),
+							resultMap.get("startTime"),
+							resultMap.get("stopTime"),
+							resultMap.get("processingMode"),
+							resultMap.get("orderState")));
+				}
+			}
 		}
 	}
 	
@@ -490,13 +536,13 @@ public class OrderCommandRunner {
 		boolean isDeleteAttributes = false;
 		for (ParsedOption option: updateCommand.getOptions()) {
 			switch(option.getName()) {
-			case "file":
+			case OPTION_FILE:
 				orderFile = new File(option.getValue());
 				break;
-			case "format":
+			case OPTION_FORMAT:
 				orderFileFormat = option.getValue().toUpperCase();
 				break;
-			case "delete-attributes":
+			case OPTION_DELETE_ATTRIBUTES:
 				isDeleteAttributes = true;
 				break;
 			}
@@ -510,7 +556,7 @@ public class OrderCommandRunner {
 			try {
 				updatedOrder = CLIUtil.parseObjectFile(orderFile, orderFileFormat, RestOrder.class);
 			} catch (IllegalArgumentException | IOException e) {
-				System.err.println(uiMsg(MSG_ID_EXCEPTION, e.getMessage()));
+				System.err.println(ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage()));
 				return;
 			}
 		}
@@ -526,7 +572,7 @@ public class OrderCommandRunner {
 				try {
 					CLIUtil.setAttribute(updatedOrder, param.getValue());
 				} catch (Exception e) {
-					System.err.println(uiMsg(MSG_ID_EXCEPTION, e.getMessage()));
+					System.err.println(ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage()));
 					return;
 				}
 			}
@@ -553,7 +599,7 @@ public class OrderCommandRunner {
 				}
 			} else {
 				// No identifying value given
-				System.err.println(uiMsg(MSG_ID_NO_IDENTIFIER_GIVEN));
+				System.err.println(ProseoLogger.format(UIMessage.NO_IDENTIFIER_GIVEN));
 				return;
 			}
 		} catch (RestClientResponseException e) {
@@ -561,44 +607,57 @@ public class OrderCommandRunner {
 			String message = null;
 			switch (e.getRawStatusCode()) {
 			case org.apache.http.HttpStatus.SC_NOT_FOUND:
-				message = uiMsg(MSG_ID_ORDER_NOT_FOUND, updatedOrder.getIdentifier());
+				message = ProseoLogger.format(UIMessage.ORDER_NOT_FOUND, updatedOrder.getIdentifier());
 				break;
 			case org.apache.http.HttpStatus.SC_UNAUTHORIZED:
 			case org.apache.http.HttpStatus.SC_FORBIDDEN:
-				message = uiMsg(MSG_ID_NOT_AUTHORIZED, loginManager.getUser(), ORDERS, loginManager.getMission());
+				message = (null == e.getStatusText() ?
+						ProseoLogger.format(UIMessage.NOT_AUTHORIZED, loginManager.getUser(), ORDERS, loginManager.getMission()) :
+						e.getStatusText());
 				break;
 			default:
-				message = uiMsg(MSG_ID_EXCEPTION, e.getMessage());
+				message = ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage());
 			}
 			System.err.println(message);
 			return;
 		} catch (RuntimeException e) {
-			System.err.println(uiMsg(MSG_ID_EXCEPTION, e.getMessage()));
+			System.err.println(ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage()));
 			return;
 		}
 		
 		/* Check whether (database) order is in state "INITIAL", otherwise no user updates allowed */
 		if (!OrderState.INITIAL.toString().equals(restOrder.getOrderState())) {
-			System.err.println(uiMsg(MSG_ID_INVALID_ORDER_STATE,
+			System.err.println(ProseoLogger.format(UIMessage.INVALID_ORDER_STATE,
 					CMD_UPDATE, restOrder.getOrderState(), OrderState.INITIAL.toString()));
 			return;
 		}
 		
 		/* Compare attributes of database order with updated order */
 		// No modification of ID, version, mission code or identifier allowed
+		if (null != updatedOrder.getOrderState()) { // mandatory
+			// We rely on the state transition check of the backend service here (in contrast to the other state changing methods)
+			restOrder.setOrderState(updatedOrder.getOrderState());
+		}
 		if (isDeleteAttributes || null != updatedOrder.getExecutionTime()) {
 			restOrder.setExecutionTime(updatedOrder.getExecutionTime());
+		}
+		if (isDeleteAttributes || null != updatedOrder.getEvictionTime()) {
+			restOrder.setEvictionTime(updatedOrder.getEvictionTime());
 		}
 		if (null != updatedOrder.getSlicingType()) { // mandatory
 			restOrder.setSlicingType(updatedOrder.getSlicingType());
 		}
 		if ((isDeleteAttributes && !OrderSlicingType.TIME_SLICE.toString().equals(restOrder.getSlicingType())
-				&& !OrderSlicingType.CALENDAR_DAY.toString().equals(restOrder.getSlicingType())) 
+				&& !OrderSlicingType.CALENDAR_DAY.toString().equals(restOrder.getSlicingType())
+				&& !OrderSlicingType.CALENDAR_MONTH.toString().equals(restOrder.getSlicingType())
+				&& !OrderSlicingType.CALENDAR_YEAR.toString().equals(restOrder.getSlicingType())) 
 				|| null != updatedOrder.getStartTime()) { // mandatory for TIME_SLICE and CALENDAR_DAY
 			restOrder.setStartTime(updatedOrder.getStartTime());
 		}
 		if ((isDeleteAttributes && !OrderSlicingType.TIME_SLICE.toString().equals(restOrder.getSlicingType())
-				&& !OrderSlicingType.CALENDAR_DAY.toString().equals(restOrder.getSlicingType())) 
+				&& !OrderSlicingType.CALENDAR_DAY.toString().equals(restOrder.getSlicingType())
+				&& !OrderSlicingType.CALENDAR_MONTH.toString().equals(restOrder.getSlicingType())
+				&& !OrderSlicingType.CALENDAR_YEAR.toString().equals(restOrder.getSlicingType())) 
 				|| null != updatedOrder.getStopTime()) { // mandatory for TIME_SLICE and CALENDAR_DAY
 			restOrder.setStopTime(updatedOrder.getStopTime());
 		}
@@ -640,6 +699,9 @@ public class OrderCommandRunner {
 		if (null != updatedOrder.getProductionType()) { // mandatory
 			restOrder.setProductionType(updatedOrder.getProductionType());
 		}
+		if (isDeleteAttributes || null != updatedOrder.getProductRetentionPeriod()) {
+			restOrder.setProductRetentionPeriod(updatedOrder.getProductRetentionPeriod());
+		}
 		if (null != updatedOrder.getHasFailedJobSteps()) { // mandatory
 			restOrder.setHasFailedJobSteps(updatedOrder.getHasFailedJobSteps());
 		}
@@ -653,31 +715,32 @@ public class OrderCommandRunner {
 			String message = null;
 			switch (e.getRawStatusCode()) {
 			case org.apache.http.HttpStatus.SC_NOT_MODIFIED:
-				System.out.println(uiMsg(MSG_ID_NOT_MODIFIED));
+				System.out.println(ProseoLogger.format(UIMessage.NOT_MODIFIED));
 				return;
 			case org.apache.http.HttpStatus.SC_NOT_FOUND:
-				message = uiMsg(MSG_ID_ORDER_NOT_FOUND, restOrder.getIdentifier());
+				message = ProseoLogger.format(UIMessage.ORDER_NOT_FOUND, restOrder.getIdentifier());
 				break;
 			case org.apache.http.HttpStatus.SC_BAD_REQUEST:
-				message = uiMsg(MSG_ID_ORDER_DATA_INVALID,  e.getMessage());
+				message = ProseoLogger.format(UIMessage.ORDER_DATA_INVALID,  e.getStatusText());
 				break;
 			case org.apache.http.HttpStatus.SC_UNAUTHORIZED:
 			case org.apache.http.HttpStatus.SC_FORBIDDEN:
-				message = uiMsg(MSG_ID_NOT_AUTHORIZED, loginManager.getUser(), ORDERS, loginManager.getMission());
+				message = (null == e.getStatusText() ?
+						ProseoLogger.format(UIMessage.NOT_AUTHORIZED, loginManager.getUser(), ORDERS, loginManager.getMission()) :
+						e.getStatusText());
 				break;
 			default:
-				message = uiMsg(MSG_ID_EXCEPTION, e.getMessage());
+				message = ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage());
 			}
 			System.err.println(message);
 			return;
 		} catch (RuntimeException e) {
-			System.err.println(uiMsg(MSG_ID_EXCEPTION, e.getMessage()));
+			System.err.println(ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage()));
 			return;
 		}
 		
 		/* Report success, giving new order version */
-		String message = uiMsg(MSG_ID_ORDER_UPDATED, restOrder.getIdentifier(), restOrder.getVersion());
-		logger.info(message);
+		String message = logger.log(UIMessage.ORDER_UPDATED, restOrder.getIdentifier(), restOrder.getVersion());
 		System.out.println(message);
 	}
 	
@@ -697,39 +760,40 @@ public class OrderCommandRunner {
 		/* Check whether (database) order is in state "INITIAL" or "CLOSED", otherwise no user updates allowed */
 		if (!OrderState.INITIAL.toString().equals(restOrder.getOrderState()) 
 				&& !OrderState.CLOSED.toString().equals(restOrder.getOrderState())) {
-			System.err.println(uiMsg(MSG_ID_INVALID_ORDER_STATE,
+			System.err.println(ProseoLogger.format(UIMessage.INVALID_ORDER_STATE,
 					CMD_DELETE, restOrder.getOrderState(), OrderState.INITIAL.toString() + " or " + OrderState.CLOSED.toString()));
 			return;
 		}
 		
-		/* Delete order using Production Planner service */
+		/* Delete order using Order Manager service */
 		try {
-			serviceConnection.deleteFromService(serviceConfig.getProductionPlannerUrl(), URI_PATH_ORDERS + "/" + restOrder.getId(),
+			serviceConnection.deleteFromService(serviceConfig.getOrderManagerUrl(), URI_PATH_ORDERS + "/" + restOrder.getId(),
 						loginManager.getUser(), loginManager.getPassword());
 		} catch (RestClientResponseException e) {
 			if (logger.isTraceEnabled()) logger.trace("Caught HttpClientErrorException " + e.getMessage());
 			String message = null;
 			switch (e.getRawStatusCode()) {
 			case org.apache.http.HttpStatus.SC_NOT_FOUND:
-				message = uiMsg(MSG_ID_ORDER_NOT_FOUND, restOrder.getId());
+				message = ProseoLogger.format(UIMessage.ORDER_NOT_FOUND, restOrder.getId());
 				break;
 			case org.apache.http.HttpStatus.SC_UNAUTHORIZED:
 			case org.apache.http.HttpStatus.SC_FORBIDDEN:
-				message = uiMsg(MSG_ID_NOT_AUTHORIZED, loginManager.getUser(), ORDERS, loginManager.getMission());
+				message = (null == e.getStatusText() ?
+						ProseoLogger.format(UIMessage.NOT_AUTHORIZED, loginManager.getUser(), ORDERS, loginManager.getMission()) :
+						e.getStatusText());
 				break;
 			default:
-				message = uiMsg(MSG_ID_EXCEPTION, e.getMessage());
+				message = ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage());
 			}
 			System.err.println(message);
 			return;
 		} catch (RuntimeException e) {
-			System.err.println(uiMsg(MSG_ID_EXCEPTION, e.getMessage()));
+			System.err.println(ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage()));
 			return;
 		}
 		
 		/* Report success */
-		String message = uiMsg(MSG_ID_ORDER_DELETED, restOrder.getIdentifier());
-		logger.info(message);
+		String message = logger.log(UIMessage.ORDER_DELETED, restOrder.getIdentifier());
 		System.out.println(message);
 	}
 	
@@ -748,7 +812,7 @@ public class OrderCommandRunner {
 		
 		/* Check whether (database) order is in state "INITIAL", otherwise approval not allowed */
 		if (!OrderState.INITIAL.toString().equals(restOrder.getOrderState())) {
-			System.err.println(uiMsg(MSG_ID_INVALID_ORDER_STATE,
+			System.err.println(ProseoLogger.format(UIMessage.INVALID_ORDER_STATE,
 					CMD_APPROVE, restOrder.getOrderState(), OrderState.INITIAL.toString()));
 			return;
 		}
@@ -763,28 +827,29 @@ public class OrderCommandRunner {
 			String message = null;
 			switch (e.getRawStatusCode()) {
 			case org.apache.http.HttpStatus.SC_NOT_FOUND:
-				message = uiMsg(MSG_ID_ORDER_NOT_FOUND, restOrder.getIdentifier());
+				message = ProseoLogger.format(UIMessage.ORDER_NOT_FOUND, restOrder.getIdentifier());
 				break;
 			case org.apache.http.HttpStatus.SC_BAD_REQUEST:
-				message = uiMsg(MSG_ID_ORDER_DATA_INVALID,  e.getMessage());
+				message = ProseoLogger.format(UIMessage.ORDER_DATA_INVALID,  e.getStatusText());
 				break;
 			case org.apache.http.HttpStatus.SC_UNAUTHORIZED:
 			case org.apache.http.HttpStatus.SC_FORBIDDEN:
-				message = uiMsg(MSG_ID_NOT_AUTHORIZED, loginManager.getUser(), ORDERS, loginManager.getMission());
+				message = (null == e.getStatusText() ?
+						ProseoLogger.format(UIMessage.NOT_AUTHORIZED, loginManager.getUser(), ORDERS, loginManager.getMission()) :
+						e.getStatusText());
 				break;
 			default:
-				message = uiMsg(MSG_ID_EXCEPTION, e.getMessage());
+				message = ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage());
 			}
 			System.err.println(message);
 			return;
 		} catch (RuntimeException e) {
-			System.err.println(uiMsg(MSG_ID_EXCEPTION, e.getMessage()));
+			System.err.println(ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage()));
 			return;
 		}
 		
 		/* Report success, giving new order version */
-		String message = uiMsg(MSG_ID_ORDER_APPROVED, restOrder.getIdentifier(), restOrder.getVersion());
-		logger.info(message);
+		String message = logger.log(UIMessage.ORDER_APPROVED, restOrder.getIdentifier(), restOrder.getVersion());
 		System.out.println(message);
 	}
 	
@@ -805,7 +870,7 @@ public class OrderCommandRunner {
 		String orderOutputFormat = FORMAT_PLAIN;
 		for (ParsedOption option: planCommand.getOptions()) {
 			switch(option.getName()) {
-			case "format":
+			case OPTION_FORMAT:
 				orderOutputFormat = option.getValue().toUpperCase();
 				break;
 			}
@@ -813,14 +878,15 @@ public class OrderCommandRunner {
 		
 		/* Get the processing facility name from the second parameter */
 		if (2 > planCommand.getParameters().size()) {
-			System.err.println(uiMsg(MSG_ID_FACILITY_MISSING));
+			System.err.println(ProseoLogger.format(UIMessage.FACILITY_MISSING));
 			return;
 		}
 		String processingFacility = planCommand.getParameters().get(1).getValue();
 		
 		/* Check whether (database) order is in state "APPROVED", otherwise planning not allowed */
-		if (!OrderState.APPROVED.toString().equals(restOrder.getOrderState())) {
-			System.err.println(uiMsg(MSG_ID_INVALID_ORDER_STATE,
+		if (!OrderState.APPROVED.toString().equals(restOrder.getOrderState())
+				&& !OrderState.PLANNING_FAILED.toString().equals(restOrder.getOrderState())) {
+			System.err.println(ProseoLogger.format(UIMessage.INVALID_ORDER_STATE,
 					CMD_PLAN, restOrder.getOrderState(), OrderState.APPROVED.toString()));
 			return;
 		}
@@ -835,28 +901,29 @@ public class OrderCommandRunner {
 			String message = null;
 			switch (e.getRawStatusCode()) {
 			case org.apache.http.HttpStatus.SC_NOT_FOUND:
-				message = uiMsg(MSG_ID_FACILITY_NOT_FOUND, processingFacility);
+				message = ProseoLogger.format(UIMessage.FACILITY_NOT_FOUND, processingFacility);
 				break;
 			case org.apache.http.HttpStatus.SC_BAD_REQUEST:
-				message = uiMsg(MSG_ID_ORDER_DATA_INVALID,  e.getMessage());
+				message = ProseoLogger.format(UIMessage.ORDER_DATA_INVALID,  e.getStatusText());
 				break;
 			case org.apache.http.HttpStatus.SC_UNAUTHORIZED:
 			case org.apache.http.HttpStatus.SC_FORBIDDEN:
-				message = uiMsg(MSG_ID_NOT_AUTHORIZED, loginManager.getUser(), ORDERS, loginManager.getMission());
+				message = (null == e.getStatusText() ?
+						ProseoLogger.format(UIMessage.NOT_AUTHORIZED, loginManager.getUser(), ORDERS, loginManager.getMission()) :
+						e.getStatusText());
 				break;
 			default:
-				message = uiMsg(MSG_ID_EXCEPTION, e.getMessage());
+				message = ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage());
 			}
 			System.err.println(message);
 			return;
 		} catch (RuntimeException e) {
-			System.err.println(uiMsg(MSG_ID_EXCEPTION, e.getMessage()));
+			System.err.println(ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage()));
 			return;
 		}
 		
 		/* Report success and list jobs and job steps (if user wants to see them) */
-		String message = uiMsg(MSG_ID_ORDER_PLANNED, restOrder.getIdentifier(), restOrder.getVersion());
-		logger.info(message);
+		String message = logger.log(UIMessage.ORDER_PLANNED, restOrder.getIdentifier(), restOrder.getVersion());
 		System.out.println(message);
 		
 		if (FORMAT_NONE.equals(orderOutputFormat)) {
@@ -874,22 +941,24 @@ public class OrderCommandRunner {
 			message = null;
 			switch (e.getRawStatusCode()) {
 			case org.apache.http.HttpStatus.SC_NOT_FOUND:
-				message = uiMsg(MSG_ID_ORDER_JOBS_NOT_FOUND, restOrder.getIdentifier());
+				message = ProseoLogger.format(UIMessage.ORDER_JOBS_NOT_FOUND, restOrder.getIdentifier());
 				break;
 			case org.apache.http.HttpStatus.SC_BAD_REQUEST:
-				message = uiMsg(MSG_ID_ORDER_DATA_INVALID,  e.getMessage());
+				message = ProseoLogger.format(UIMessage.ORDER_DATA_INVALID,  e.getStatusText());
 				break;
 			case org.apache.http.HttpStatus.SC_UNAUTHORIZED:
 			case org.apache.http.HttpStatus.SC_FORBIDDEN:
-				message = uiMsg(MSG_ID_NOT_AUTHORIZED, loginManager.getUser(), JOBS, loginManager.getMission());
+				message = (null == e.getStatusText() ?
+						ProseoLogger.format(UIMessage.NOT_AUTHORIZED, loginManager.getUser(), JOBS, loginManager.getMission()) :
+						e.getStatusText());
 				break;
 			default:
-				message = uiMsg(MSG_ID_EXCEPTION, e.getMessage());
+				message = ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage());
 			}
 			System.err.println(message);
 			return;
 		} catch (RuntimeException e) {
-			System.err.println(uiMsg(MSG_ID_EXCEPTION, e.getMessage()));
+			System.err.println(ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage()));
 			return;
 		}
 		
@@ -922,7 +991,7 @@ public class OrderCommandRunner {
 				System.err.println(e.getMessage());
 				return;
 			} catch (IOException e) {
-				System.err.println(uiMsg(MSG_ID_EXCEPTION, e.getMessage()));
+				System.err.println(ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage()));
 				return;
 			} 
 		} 
@@ -943,7 +1012,7 @@ public class OrderCommandRunner {
 		
 		/* Check whether (database) order is in state "PLANNED", otherwise release not allowed */
 		if (!OrderState.PLANNED.toString().equals(restOrder.getOrderState())) {
-			System.err.println(uiMsg(MSG_ID_INVALID_ORDER_STATE,
+			System.err.println(ProseoLogger.format(UIMessage.INVALID_ORDER_STATE,
 					CMD_RELEASE, restOrder.getOrderState(), OrderState.PLANNED.toString()));
 			return;
 		}
@@ -958,28 +1027,29 @@ public class OrderCommandRunner {
 			String message = null;
 			switch (e.getRawStatusCode()) {
 			case org.apache.http.HttpStatus.SC_NOT_FOUND:
-				message = uiMsg(MSG_ID_ORDER_NOT_FOUND, restOrder.getIdentifier());
+				message = ProseoLogger.format(UIMessage.ORDER_NOT_FOUND, restOrder.getIdentifier());
 				break;
 			case org.apache.http.HttpStatus.SC_BAD_REQUEST:
-				message = uiMsg(MSG_ID_ORDER_DATA_INVALID,  e.getMessage());
+				message = ProseoLogger.format(UIMessage.ORDER_DATA_INVALID,  e.getStatusText());
 				break;
 			case org.apache.http.HttpStatus.SC_UNAUTHORIZED:
 			case org.apache.http.HttpStatus.SC_FORBIDDEN:
-				message = uiMsg(MSG_ID_NOT_AUTHORIZED, loginManager.getUser(), ORDERS, loginManager.getMission());
+				message = (null == e.getStatusText() ?
+						ProseoLogger.format(UIMessage.NOT_AUTHORIZED, loginManager.getUser(), ORDERS, loginManager.getMission()) :
+						e.getStatusText());
 				break;
 			default:
-				message = uiMsg(MSG_ID_EXCEPTION, e.getMessage());
+				message = ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage());
 			}
 			System.err.println(message);
 			return;
 		} catch (RuntimeException e) {
-			System.err.println(uiMsg(MSG_ID_EXCEPTION, e.getMessage()));
+			System.err.println(ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage()));
 			return;
 		}
 		
 		/* Report success, giving new order version */
-		String message = uiMsg(MSG_ID_ORDER_RELEASED, restOrder.getIdentifier(), restOrder.getVersion());
-		logger.info(message);
+		String message = logger.log(UIMessage.ORDER_RELEASING, restOrder.getIdentifier(), restOrder.getVersion());
 		System.out.println(message);
 	}
 	
@@ -995,7 +1065,7 @@ public class OrderCommandRunner {
 		boolean isForcing = false;
 		for (ParsedOption option: suspendCommand.getOptions()) {
 			switch(option.getName()) {
-			case "force":
+			case OPTION_FORCE:
 				isForcing = true;
 				break;
 			}
@@ -1008,8 +1078,9 @@ public class OrderCommandRunner {
 		
 		/* Check whether (database) order is in state "RELEASED" or "RUNNING", otherwise suspending not allowed */
 		if (!OrderState.RELEASED.toString().equals(restOrder.getOrderState())
+				&& !OrderState.RELEASING.toString().equals(restOrder.getOrderState())
 				&& !OrderState.RUNNING.toString().equals(restOrder.getOrderState())) {
-			System.err.println(uiMsg(MSG_ID_INVALID_ORDER_STATE,
+			System.err.println(ProseoLogger.format(UIMessage.INVALID_ORDER_STATE,
 					CMD_SUSPEND, restOrder.getOrderState(), OrderState.RELEASED.toString() + " or " + OrderState.RUNNING.toString()));
 			return;
 		}
@@ -1025,28 +1096,29 @@ public class OrderCommandRunner {
 			String message = null;
 			switch (e.getRawStatusCode()) {
 			case org.apache.http.HttpStatus.SC_NOT_FOUND:
-				message = uiMsg(MSG_ID_ORDER_NOT_FOUND, restOrder.getIdentifier());
+				message = ProseoLogger.format(UIMessage.ORDER_NOT_FOUND, restOrder.getIdentifier());
 				break;
 			case org.apache.http.HttpStatus.SC_BAD_REQUEST:
-				message = uiMsg(MSG_ID_ORDER_DATA_INVALID,  e.getMessage());
+				message = ProseoLogger.format(UIMessage.ORDER_DATA_INVALID,  e.getStatusText());
 				break;
 			case org.apache.http.HttpStatus.SC_UNAUTHORIZED:
 			case org.apache.http.HttpStatus.SC_FORBIDDEN:
-				message = uiMsg(MSG_ID_NOT_AUTHORIZED, loginManager.getUser(), ORDERS, loginManager.getMission());
+				message = (null == e.getStatusText() ?
+						ProseoLogger.format(UIMessage.NOT_AUTHORIZED, loginManager.getUser(), ORDERS, loginManager.getMission()) :
+						e.getStatusText());
 				break;
 			default:
-				message = uiMsg(MSG_ID_EXCEPTION, e.getMessage());
+				message = ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage());
 			}
 			System.err.println(message);
 			return;
 		} catch (RuntimeException e) {
-			System.err.println(uiMsg(MSG_ID_EXCEPTION, e.getMessage()));
+			System.err.println(ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage()));
 			return;
 		}
 		
 		/* Report success, giving new order version */
-		String message = uiMsg(MSG_ID_ORDER_SUSPENDED, restOrder.getIdentifier(), restOrder.getVersion());
-		logger.info(message);
+		String message = logger.log(UIMessage.ORDER_SUSPENDED, restOrder.getIdentifier(), restOrder.getVersion());
 		System.out.println(message);
 	}
 	
@@ -1076,7 +1148,7 @@ public class OrderCommandRunner {
 		
 		/* Check whether (database) order is in state "PLANNED", otherwise cancel not allowed */
 		if (!OrderState.PLANNED.toString().equals(restOrder.getOrderState())) {
-			System.err.println(uiMsg(MSG_ID_INVALID_ORDER_STATE,
+			System.err.println(ProseoLogger.format(UIMessage.INVALID_ORDER_STATE,
 					CMD_CANCEL, restOrder.getOrderState(), OrderState.PLANNED.toString()));
 			return;
 		}
@@ -1090,28 +1162,29 @@ public class OrderCommandRunner {
 			String message = null;
 			switch (e.getRawStatusCode()) {
 			case org.apache.http.HttpStatus.SC_NOT_FOUND:
-				message = uiMsg(MSG_ID_ORDER_NOT_FOUND, restOrder.getIdentifier());
+				message = ProseoLogger.format(UIMessage.ORDER_NOT_FOUND, restOrder.getIdentifier());
 				break;
 			case org.apache.http.HttpStatus.SC_BAD_REQUEST:
-				message = uiMsg(MSG_ID_ORDER_DATA_INVALID,  e.getMessage());
+				message = ProseoLogger.format(UIMessage.ORDER_DATA_INVALID,  e.getStatusText());
 				break;
 			case org.apache.http.HttpStatus.SC_UNAUTHORIZED:
 			case org.apache.http.HttpStatus.SC_FORBIDDEN:
-				message = uiMsg(MSG_ID_NOT_AUTHORIZED, loginManager.getUser(), ORDERS, loginManager.getMission());
+				message = (null == e.getStatusText() ?
+						ProseoLogger.format(UIMessage.NOT_AUTHORIZED, loginManager.getUser(), ORDERS, loginManager.getMission()) :
+						e.getStatusText());
 				break;
 			default:
-				message = uiMsg(MSG_ID_EXCEPTION, e.getMessage());
+				message = ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage());
 			}
 			System.err.println(message);
 			return;
 		} catch (RuntimeException e) {
-			System.err.println(uiMsg(MSG_ID_EXCEPTION, e.getMessage()));
+			System.err.println(ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage()));
 			return;
 		}
 		
 		/* Report success, giving new order version */
-		String message = uiMsg(MSG_ID_ORDER_CANCELLED, restOrder.getIdentifier(), restOrder.getVersion());
-		logger.info(message);
+		String message = logger.log(UIMessage.ORDER_CANCELLED, restOrder.getIdentifier(), restOrder.getVersion());
 		System.out.println(message);
 	}
 	
@@ -1130,7 +1203,7 @@ public class OrderCommandRunner {
 		
 		/* Check whether (database) order is in state "FAILED", otherwise retry not allowed */
 		if (!OrderState.FAILED.toString().equals(restOrder.getOrderState())) {
-			System.err.println(uiMsg(MSG_ID_INVALID_ORDER_STATE,
+			System.err.println(ProseoLogger.format(UIMessage.INVALID_ORDER_STATE,
 					CMD_RETRY, restOrder.getOrderState(), OrderState.FAILED.toString()));
 			return;
 		}
@@ -1144,28 +1217,29 @@ public class OrderCommandRunner {
 			String message = null;
 			switch (e.getRawStatusCode()) {
 			case org.apache.http.HttpStatus.SC_NOT_FOUND:
-				message = uiMsg(MSG_ID_ORDER_NOT_FOUND, restOrder.getIdentifier());
+				message = ProseoLogger.format(UIMessage.ORDER_NOT_FOUND, restOrder.getIdentifier());
 				break;
 			case org.apache.http.HttpStatus.SC_BAD_REQUEST:
-				message = uiMsg(MSG_ID_ORDER_DATA_INVALID,  e.getMessage());
+				message = ProseoLogger.format(UIMessage.ORDER_DATA_INVALID,  e.getStatusText());
 				break;
 			case org.apache.http.HttpStatus.SC_UNAUTHORIZED:
 			case org.apache.http.HttpStatus.SC_FORBIDDEN:
-				message = uiMsg(MSG_ID_NOT_AUTHORIZED, loginManager.getUser(), ORDERS, loginManager.getMission());
+				message = (null == e.getStatusText() ?
+						ProseoLogger.format(UIMessage.NOT_AUTHORIZED, loginManager.getUser(), ORDERS, loginManager.getMission()) :
+						e.getStatusText());
 				break;
 			default:
-				message = uiMsg(MSG_ID_EXCEPTION, e.getMessage());
+				message = ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage());
 			}
 			System.err.println(message);
 			return;
 		} catch (RuntimeException e) {
-			System.err.println(uiMsg(MSG_ID_EXCEPTION, e.getMessage()));
+			System.err.println(ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage()));
 			return;
 		}
 		
 		/* Report success, giving new order version */
-		String message = uiMsg(MSG_ID_RETRYING_ORDER, restOrder.getIdentifier(), restOrder.getVersion());
-		logger.info(message);
+		String message = logger.log(UIMessage.RETRYING_ORDER, restOrder.getIdentifier(), restOrder.getVersion());
 		System.out.println(message);
 	}
 	
@@ -1184,7 +1258,7 @@ public class OrderCommandRunner {
 		
 		/* Check whether (database) order is in state "COMPLETED" or "FAILED", otherwise close not allowed */
 		if (!OrderState.FAILED.toString().equals(restOrder.getOrderState()) && !OrderState.COMPLETED.toString().equals(restOrder.getOrderState())) {
-			System.err.println(uiMsg(MSG_ID_INVALID_ORDER_STATE,
+			System.err.println(ProseoLogger.format(UIMessage.INVALID_ORDER_STATE,
 					CMD_CLOSE, restOrder.getOrderState(), OrderState.COMPLETED.toString() + ", " + OrderState.FAILED.toString()));
 			return;
 		}
@@ -1192,35 +1266,37 @@ public class OrderCommandRunner {
 		/* Update order state to "APPROVED" using Order Manager service */
 		restOrder.setOrderState(OrderState.CLOSED.toString());
 		try {
-			restOrder = serviceConnection.patchToService(serviceConfig.getOrderManagerUrl(), URI_PATH_ORDERS + "/" + restOrder.getId(),
+			restOrder = serviceConnection.patchToService(serviceConfig.getProductionPlannerUrl(),
+					URI_PATH_ORDER_CLOSE + "/" + restOrder.getId(),
 					restOrder, RestOrder.class, loginManager.getUser(), loginManager.getPassword());
 		} catch (RestClientResponseException e) {
 			if (logger.isTraceEnabled()) logger.trace("Caught HttpClientErrorException " + e.getMessage());
 			String message = null;
 			switch (e.getRawStatusCode()) {
 			case org.apache.http.HttpStatus.SC_NOT_FOUND:
-				message = uiMsg(MSG_ID_ORDER_NOT_FOUND, restOrder.getIdentifier());
+				message = ProseoLogger.format(UIMessage.ORDER_NOT_FOUND, restOrder.getIdentifier());
 				break;
 			case org.apache.http.HttpStatus.SC_BAD_REQUEST:
-				message = uiMsg(MSG_ID_ORDER_DATA_INVALID,  e.getMessage());
+				message = ProseoLogger.format(UIMessage.ORDER_DATA_INVALID,  e.getStatusText());
 				break;
 			case org.apache.http.HttpStatus.SC_UNAUTHORIZED:
 			case org.apache.http.HttpStatus.SC_FORBIDDEN:
-				message = uiMsg(MSG_ID_NOT_AUTHORIZED, loginManager.getUser(), ORDERS, loginManager.getMission());
+				message = (null == e.getStatusText() ?
+						ProseoLogger.format(UIMessage.NOT_AUTHORIZED, loginManager.getUser(), ORDERS, loginManager.getMission()) :
+						e.getStatusText());
 				break;
 			default:
-				message = uiMsg(MSG_ID_EXCEPTION, e.getMessage());
+				message = ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage());
 			}
 			System.err.println(message);
 			return;
 		} catch (RuntimeException e) {
-			System.err.println(uiMsg(MSG_ID_EXCEPTION, e.getMessage()));
+			System.err.println(ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage()));
 			return;
 		}
 		
 		/* Report success, giving new order version */
-		String message = uiMsg(MSG_ID_ORDER_UPDATED, restOrder.getIdentifier(), restOrder.getVersion());
-		logger.info(message);
+		String message = logger.log(UIMessage.ORDER_UPDATED, restOrder.getIdentifier(), restOrder.getVersion());
 		System.out.println(message);
 	}
 	
@@ -1238,8 +1314,11 @@ public class OrderCommandRunner {
 			return;
 		
 		/* Check whether (database) order is in state "APPROVED" or "PLANNED", otherwise reset not allowed */
-		if (!OrderState.APPROVED.toString().equals(restOrder.getOrderState()) && !OrderState.PLANNED.toString().equals(restOrder.getOrderState())) {
-			System.err.println(uiMsg(MSG_ID_INVALID_ORDER_STATE,
+		if (!OrderState.APPROVED.toString().equals(restOrder.getOrderState()) 
+				&& !OrderState.PLANNING.toString().equals(restOrder.getOrderState())
+				&& !OrderState.PLANNING_FAILED.toString().equals(restOrder.getOrderState())
+				&& !OrderState.PLANNED.toString().equals(restOrder.getOrderState())) {
+			System.err.println(ProseoLogger.format(UIMessage.INVALID_ORDER_STATE,
 					CMD_RESET, restOrder.getOrderState(), OrderState.APPROVED.toString() + ", " + OrderState.PLANNED.toString()));
 			return;
 		}
@@ -1254,28 +1333,29 @@ public class OrderCommandRunner {
 			String message = null;
 			switch (e.getRawStatusCode()) {
 			case org.apache.http.HttpStatus.SC_NOT_FOUND:
-				message = uiMsg(MSG_ID_ORDER_NOT_FOUND, restOrder.getIdentifier());
+				message = ProseoLogger.format(UIMessage.ORDER_NOT_FOUND, restOrder.getIdentifier());
 				break;
 			case org.apache.http.HttpStatus.SC_BAD_REQUEST:
-				message = uiMsg(MSG_ID_ORDER_DATA_INVALID,  e.getMessage());
+				message = ProseoLogger.format(UIMessage.ORDER_DATA_INVALID,  e.getStatusText());
 				break;
 			case org.apache.http.HttpStatus.SC_UNAUTHORIZED:
 			case org.apache.http.HttpStatus.SC_FORBIDDEN:
-				message = uiMsg(MSG_ID_NOT_AUTHORIZED, loginManager.getUser(), ORDERS, loginManager.getMission());
+				message = (null == e.getStatusText() ?
+						ProseoLogger.format(UIMessage.NOT_AUTHORIZED, loginManager.getUser(), ORDERS, loginManager.getMission()) :
+						e.getStatusText());
 				break;
 			default:
-				message = uiMsg(MSG_ID_EXCEPTION, e.getMessage());
+				message = ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage());
 			}
 			System.err.println(message);
 			return;
 		} catch (RuntimeException e) {
-			System.err.println(uiMsg(MSG_ID_EXCEPTION, e.getMessage()));
+			System.err.println(ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage()));
 			return;
 		}
 		
 		/* Report success, giving new order version */
-		String message = uiMsg(MSG_ID_ORDER_RESET, restOrder.getIdentifier(), restOrder.getVersion());
-		logger.info(message);
+		String message = logger.log(UIMessage.ORDER_RESET, restOrder.getIdentifier(), restOrder.getVersion());
 		System.out.println(message);
 	}
 	
@@ -1289,23 +1369,23 @@ public class OrderCommandRunner {
 		
 		/* Check that user is logged in */
 		if (null == loginManager.getUser()) {
-			System.err.println(uiMsg(MSG_ID_USER_NOT_LOGGED_IN, command.getName()));
+			System.err.println(ProseoLogger.format(UIMessage.USER_NOT_LOGGED_IN, command.getName()));
 			return;
 		}
 		if (null == loginManager.getMission()) {
-			System.err.println(uiMsg(MSG_ID_USER_NOT_LOGGED_IN_TO_MISSION, command.getName()));
+			System.err.println(ProseoLogger.format(UIMessage.USER_NOT_LOGGED_IN_TO_MISSION, command.getName()));
 			return;
 		}
 		
 		/* Check argument */
 		if (!CMD_ORDER.equals(command.getName())) {
-			System.err.println(uiMsg(MSG_ID_INVALID_COMMAND_NAME, command.getName()));
+			System.err.println(ProseoLogger.format(UIMessage.INVALID_COMMAND_NAME, command.getName()));
 			return;
 		}
 		
 		/* Make sure a subcommand is given */
 		if (null == command.getSubcommand() || null == command.getSubcommand().getName()) {
-			System.err.println(uiMsg(MSG_ID_SUBCOMMAND_MISSING, command.getName()));
+			System.err.println(ProseoLogger.format(UIMessage.SUBCOMMAND_MISSING, command.getName()));
 			return;
 		}
 		
@@ -1332,7 +1412,7 @@ public class OrderCommandRunner {
 		case CMD_CLOSE:		closeOrder(subcommand); break;
 		case CMD_RESET:		resetOrder(subcommand); break;
 		default:
-			System.err.println(uiMsg(MSG_ID_NOT_IMPLEMENTED, command.getName() + " " + subcommand.getName()));
+			System.err.println(ProseoLogger.format(UIMessage.COMMAND_NOT_IMPLEMENTED, command.getName() + " " + subcommand.getName()));
 			return;
 		}
 	}

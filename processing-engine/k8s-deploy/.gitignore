@@ -1,5 +1,0 @@
-cluster-key.*
-*.pub
-*.pem
-*.retry
-.ostackrc

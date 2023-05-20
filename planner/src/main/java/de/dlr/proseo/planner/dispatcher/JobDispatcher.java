@@ -14,8 +14,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.boot.web.client.RestTemplateBuilder;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.client.RestTemplate;
@@ -36,8 +34,12 @@ import de.dlr.proseo.model.joborder.JobOrder;
 import de.dlr.proseo.model.joborder.Proc;
 import de.dlr.proseo.model.joborder.ProcessingParameter;
 import de.dlr.proseo.model.joborder.SensingTime;
+import de.dlr.proseo.model.joborder.TimeInterval;
 import de.dlr.proseo.planner.kubernetes.KubeConfig;
 import de.dlr.proseo.interfaces.rest.model.RestJoborder;
+import de.dlr.proseo.logging.logger.ProseoLogger;
+import de.dlr.proseo.logging.messages.PlannerMessage;
+import de.dlr.proseo.model.enums.JobOrderVersion;
 import de.dlr.proseo.model.enums.StorageType;
 
 /**
@@ -53,7 +55,7 @@ import de.dlr.proseo.model.enums.StorageType;
  */
 public class JobDispatcher {
 	/** Logger for this class */
-	private static Logger logger = LoggerFactory.getLogger(JobDispatcher.class);
+	private static ProseoLogger logger =new ProseoLogger(JobDispatcher.class);
 	private static DateTimeFormatter timeFormatter = DateTimeFormatter.ofPattern("uuuuMMdd'_'HHmmssSSSSSS").withZone(ZoneId.of("UTC"));
 	
 	/**
@@ -89,7 +91,7 @@ public class JobDispatcher {
 				String stdoutLogLevel = jobStep.getStdoutLogLevel().name(); 
 				String stderrLogLevel = jobStep.getStderrLogLevel().name(); 
 				String isTest = jobStep.getOutputProduct().getConfiguredProcessor().getProcessor().getIsTest() == true ? "true" : "false";
-				String breakpointEnable = "true";
+				String breakpointEnable = "false";
 				String processingStation = jobStep.getJob().getProcessingOrder().getMission().getName() + " " + jobStep.getJob().getProcessingFacility().getName();
 				// String acquisitionStation = ""; // unknown, not to set
 
@@ -129,7 +131,7 @@ public class JobDispatcher {
 					}
 					// dynamic input files calculated by input products
 					// create IpfInput for each product class
-					Map<ProductClass, List<Product>> productClasses = new HashMap<ProductClass, List<Product>>();
+					Map<String, List<Product>> productClasses = new HashMap<String, List<Product>>();
 					for (ProductQuery pq : jobStep.getInputProductQueries()) {
 						// Replaced "getNewestSatisfyingProducts" by "getSatisfyingProducts" --> older ones are allowed!
 						// If this is a problem with some test cases, check test cases
@@ -137,7 +139,7 @@ public class JobDispatcher {
 							addProductToMap(p, productClasses);
 						}
 					}
-					addIpfIOInput(productClasses, proc, jobStep);
+					addIpfIOInput(productClasses, proc, jobStep, t.getProcessor().getUseInputFileTimeIntervals());
 					Product p = jobStep.getOutputProduct();
 					addIpfIOOutput(p, proc, jobStep, ""); 
 					jobOrder.getListOfProcs().add(proc);
@@ -145,7 +147,7 @@ public class JobDispatcher {
 
 			} catch (Exception e) {
 				e.printStackTrace();
-				jobOrder = null;
+				throw e;
 			}
 
 			// write a job order file for test purposes
@@ -155,7 +157,7 @@ public class JobDispatcher {
 					ip = InetAddress.getLocalHost();
 					String hostname = ip.getHostName();
 					if (hostname.equalsIgnoreCase("ME580")) {
-						jobOrder.writeXML("c:\\tmp\\jo" + jobStep.getId() + ".xml", true);						
+						jobOrder.writeXML("c:\\tmp\\jo" + jobStep.getId() + ".xml", JobOrderVersion.MMFI_1_8, true);						
 					}
 				} catch (UnknownHostException e) {
 					// do nothing		
@@ -170,9 +172,10 @@ public class JobDispatcher {
 	 * @param p Product
 	 * @param proc The Ipf_Proc
 	 * @param jobStep Job step
+	 * @param useTimeIntervals if true, generates TimeInterval elements to the input definition
 	 */
-	public void addIpfIOInput(Product p, Proc proc, JobStep jobStep) {
-		if (logger.isTraceEnabled()) logger.trace(">>> addIpfIOInput({}, {}, {})", p.getId(), proc.getTaskName(), jobStep.getId());
+	public void addIpfIOInput(Product p, Proc proc, JobStep jobStep, Boolean useTimeintervals) {
+		if (logger.isTraceEnabled()) logger.trace(">>> addIpfIOInput({}, {}, {}, {})", p.getId(), proc.getTaskName(), jobStep.getId(), useTimeintervals);
 
 		if (p.getComponentProducts().isEmpty()) {
 			for (ProductFile pf : p.getProductFile()) {
@@ -181,12 +184,19 @@ public class JobDispatcher {
 				String filePath = pf.getFilePath();
 				String productFilePathAndName = (null == filePath || filePath.isBlank() ? "" : filePath + "/") + pf.getProductFileName();
 				sio.getFileNames().add(new IpfFileName(productFilePathAndName, pf.getStorageType().name()));
+				if (useTimeintervals) {
+					TimeInterval ti = new TimeInterval(
+						timeFormatter.format(p.getSensingStartTime()),
+						timeFormatter.format(p.getSensingStopTime()),
+						productFilePathAndName);
+					sio.getTimeIntervals().add(ti);
+				}
 				proc.getListOfInputs().add(sio);
 				if (logger.isTraceEnabled()) logger.trace("... added product {} to input files", p.getId());
 			}
 		} else {
 			for (Product sp : p.getComponentProducts()) {
-				addIpfIOInput(sp, proc, jobStep);
+				addIpfIOInput(sp, proc, jobStep, useTimeintervals);
 			}
 		}
 	}
@@ -197,17 +207,25 @@ public class JobDispatcher {
 	 * @param productClasses a map of products accessible by product class
 	 * @param proc the Ipf_Proc element to add the input to
 	 * @param jobStep the job step, for which the Job Order is generated
+	 * @param useTimeIntervals if true, generates TimeInterval elements to the input definition
 	 */
-	public void addIpfIOInput(Map<ProductClass, List<Product>> productClasses, Proc proc, JobStep jobStep) {
-		if (logger.isTraceEnabled()) logger.trace(">>> addIpfIOInput(<...>, {}, {})", proc.getTaskName(), jobStep.getId());
+	public void addIpfIOInput(Map<String, List<Product>> productClasses, Proc proc, JobStep jobStep, Boolean useTimeintervals) {
+		if (logger.isTraceEnabled()) logger.trace(">>> addIpfIOInput(<...>, {}, {}, {})", proc.getTaskName(), jobStep.getId(), useTimeintervals);
 
-		for (ProductClass pc : productClasses.keySet()) {
-			InputOutput sio = new InputOutput(pc.getProductType(), InputOutput.FN_TYPE_PHYSICAL, InputOutput.IO_TYPE_INPUT, null);
-			for (Product p : productClasses.get(pc)) {
+		for (String pt : productClasses.keySet()) {
+			InputOutput sio = new InputOutput(pt, InputOutput.FN_TYPE_PHYSICAL, InputOutput.IO_TYPE_INPUT, null);
+			for (Product p : productClasses.get(pt)) {
 				if (p.getComponentProducts().isEmpty()) {
 					for (ProductFile pf : p.getProductFile()) {
 						String filePath = pf.getFilePath();
 						String productFilePathAndName = (null == filePath || filePath.isBlank() ? "" : filePath + "/") + pf.getProductFileName();
+						if (useTimeintervals) {
+							TimeInterval ti = new TimeInterval(
+									timeFormatter.format(p.getSensingStartTime()),
+									timeFormatter.format(p.getSensingStopTime()),
+									productFilePathAndName);
+							sio.getTimeIntervals().add(ti);
+						}
 						sio.getFileNames().add(new IpfFileName(productFilePathAndName, pf.getStorageType().name()));
 						if (logger.isTraceEnabled()) logger.trace("... added product {} to input files", p.getId());
 					}
@@ -227,16 +245,16 @@ public class JobDispatcher {
 	 * @param p The Product
 	 * @param productClasses The map
 	 */
-	private void addProductToMap(Product p, Map<ProductClass, List<Product>> productClasses) {
+	private void addProductToMap(Product p, Map<String, List<Product>> productClasses) {
 		if (logger.isTraceEnabled()) logger.trace(">>> addProductToMap({}, [...])", (null == p ? "null" : p.getId()));
 
 		if (p.getComponentProducts().isEmpty()) {
-			if (productClasses.containsKey(p.getProductClass())) {
-				productClasses.get(p.getProductClass()).add(p);
+			if (productClasses.containsKey(p.getProductClass().getProductType())) {
+				productClasses.get(p.getProductClass().getProductType()).add(p);
 			} else {
 				List<Product> plist = new ArrayList<Product>();
 				plist.add(p);
-				productClasses.put(p.getProductClass(), plist);
+				productClasses.put(p.getProductClass().getProductType(), plist);
 			}
 			if (logger.isTraceEnabled()) logger.trace("... added!");
 		} else {
@@ -287,15 +305,16 @@ public class JobDispatcher {
 	 * 
 	 * @param kubeConfig The processing facility used 
 	 * @param jobOrder The job order file
+	 * @param jobOrderVersion the Job Order file specification version to apply
 	 * @return job order
 	 */
-	public JobOrder sendJobOrderToStorageManager(KubeConfig kubeConfig, JobOrder jobOrder) {
+	public JobOrder sendJobOrderToStorageManager(KubeConfig kubeConfig, JobOrder jobOrder, JobOrderVersion jobOrderVersion) {
 		if (logger.isTraceEnabled()) logger.trace(">>> sendJobOrderToStorageManager({}, {})", kubeConfig, jobOrder);
 		
 		String storageManagerUrl = kubeConfig.getStorageManagerUrl();
 		
 		if (null == storageManagerUrl || null == jobOrder) {
-			logger.error("Insufficient data for sending job order to Storage Manager");
+			logger.log(PlannerMessage.INSUFFICIENT_ORDER_DATA);
 			return null;
 		}
 		
@@ -304,7 +323,7 @@ public class JobDispatcher {
 			RestTemplate restTemplate = rtb.setConnectTimeout(Duration.ofMillis(5000))
 					.basicAuthentication(kubeConfig.getStorageManagerUser(), kubeConfig.getStorageManagerPassword()).build();
 			String restUrl = "/joborders";
-			String b64String = jobOrder.buildBase64String(true);
+			String b64String = jobOrder.buildBase64String(jobOrderVersion, true);
 			RestJoborder jo = new RestJoborder();
 			switch (kubeConfig.getStorageType()) {
 			case S3:
@@ -318,11 +337,11 @@ public class JobDispatcher {
 			}
 			
 			jo.setJobOrderStringBase64(b64String);
-			logger.info("HTTP Request: " + storageManagerUrl + restUrl);
+			logger.log(PlannerMessage.HTTP_REQUEST, storageManagerUrl + restUrl);
 			
 			ResponseEntity<RestJoborder> response = restTemplate.postForEntity(storageManagerUrl + restUrl, jo, RestJoborder.class);
 
-			logger.info("... response is {}", response.getStatusCode());
+			logger.log(PlannerMessage.HTTP_RESPONSE, response.getStatusCode());
 
 			if (response != null && response.getBody() != null && response.getBody().getUploaded()) {
 				jobOrder.setFileName(response.getBody().getPathInfo());
@@ -330,7 +349,8 @@ public class JobDispatcher {
 				return null;
 			}		
 		} catch (Exception e) {
-			logger.error("Exception sending job order to Storage Manager: {}", e.getMessage());
+			
+			logger.log(PlannerMessage.SENDING_JOB_EXCEPTION, e.getMessage());
 			e.printStackTrace();
 			return null;
 		}

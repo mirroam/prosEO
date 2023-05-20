@@ -1,7 +1,9 @@
 package de.dlr.proseo.ui.gui;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
+
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.authentication.AuthenticationProvider;
 import org.springframework.security.authentication.BadCredentialsException;
@@ -12,6 +14,8 @@ import org.springframework.security.core.userdetails.User;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.stereotype.Component;
 
+import de.dlr.proseo.logging.logger.ProseoLogger;
+import de.dlr.proseo.logging.messages.UIMessage;
 import de.dlr.proseo.model.enums.UserRole;
 import de.dlr.proseo.ui.backend.LoginManager;
 
@@ -21,7 +25,7 @@ public class GUIAuthenticationProvider implements AuthenticationProvider {
 	private LoginManager loginManager;
 
 	/** A logger for this class */
-	private static Logger logger = LoggerFactory.getLogger(GUIAuthenticationProvider.class);
+	private static ProseoLogger logger = new ProseoLogger(GUIAuthenticationProvider.class);
 
 	@Override
 	public Authentication authenticate(Authentication authentication) throws AuthenticationException {
@@ -29,7 +33,7 @@ public class GUIAuthenticationProvider implements AuthenticationProvider {
 		if (principal instanceof String) {
 			String[] userNameParts = ((String) principal).split("/"); // --> regex "\\" --> matches "\"
 			if (userNameParts.length != 2) {
-				logger.error("Invalid Username (mission missing?): " + userNameParts);
+				logger.log(UIMessage.INVALID_USERNAME, (Object[]) userNameParts);
 				throw new BadCredentialsException("Invalid Username (mission missing?)");
 			}
 			String mission = userNameParts[0];
@@ -42,15 +46,23 @@ public class GUIAuthenticationProvider implements AuthenticationProvider {
 				newAuthentication.setPrincipal(newPrincipal);
 				newAuthentication.setCredentials(authentication.getCredentials());
 				newAuthentication.setDetails(mission);
+				newAuthentication.setNewLogin(true);
 				newAuthentication.setAuthenticated(true);
+				List<String> roles = new ArrayList<String>();
+				for (String role : loginManager.getRoles()) {
+					roles.add(role.replaceFirst("ROLE_", ""));
+				};
+				Comparator<String> c = Comparator.comparing((String x) -> x);
+				roles.sort(c);
+				newAuthentication.setUserRoles(roles);
 				return newAuthentication;
 			} else {
-				logger.error("Login failed for user: " + userName);
+				logger.log(UIMessage.LOGIN_FAILED, userName);
 				throw new BadCredentialsException("Login failed");
 			}
 
 		} else {
-			logger.error("Unknown authentication Type: " + authentication);
+			logger.log(UIMessage.UNKNOWN_AUTHENTICATION_TYPE, authentication);
 			throw new BadCredentialsException("Unknown authentication Type");
 		}
 	}

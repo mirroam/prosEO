@@ -5,8 +5,6 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.reactive.ReactorClientHttpConnector;
@@ -16,12 +14,16 @@ import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.client.RestClientResponseException;
 import org.springframework.web.context.request.async.DeferredResult;
 import org.springframework.web.reactive.function.client.ClientResponse;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClient.Builder;
 
+import de.dlr.proseo.logging.logger.ProseoLogger;
+import de.dlr.proseo.logging.messages.UIMessage;
 import de.dlr.proseo.ui.backend.ServiceConfiguration;
+import de.dlr.proseo.ui.backend.ServiceConnection;
 import de.dlr.proseo.ui.gui.service.MapComparator;
 import io.netty.handler.codec.http.HttpResponseStatus;
 import reactor.core.publisher.Mono;
@@ -30,15 +32,15 @@ import reactor.netty.http.client.HttpClient;
 public class GUIProductClassController extends GUIBaseController {
 
 	/** A logger for this class */
-	private static Logger logger = LoggerFactory.getLogger(GUIProductClassController.class);
+	private static ProseoLogger logger = new ProseoLogger(GUIProductClassController.class);
 
-	/** The GUI configuration */
-	@Autowired
-	private GUIConfiguration config;
-	
 	/** The configuration object for the prosEO backend services */
 	@Autowired
 	private ServiceConfiguration serviceConfig;
+	
+	/** The connector service to the prosEO backend services */
+	@Autowired
+	private ServiceConnection serviceConnection;
 
 	    @RequestMapping(value = "/productclass-show")
 	    public String showProductClass() {
@@ -49,26 +51,43 @@ public class GUIProductClassController extends GUIBaseController {
 		@SuppressWarnings("unchecked")
 		@RequestMapping(value = "/productclass/get")
 		public DeferredResult<String> getProductClasses(
+				@RequestParam(required = false, value = "productClass") String productClass,
+				@RequestParam(required = false, value = "processorClass") String processorClass,
+				@RequestParam(required = false, value = "level") String level,
+				@RequestParam(required = false, value = "visibility") String visibility,
 				@RequestParam(required = false, value = "sortby") String sortby,
-				@RequestParam(required = false, value = "up") Boolean up, Model model) {
+				@RequestParam(required = false, value = "up") Boolean up, 
+				@RequestParam(required = false, value = "recordFrom") Long fromIndex,
+				@RequestParam(required = false, value = "recordTo") Long toIndex, Model model) {
 			if (logger.isTraceEnabled())
-				logger.trace(">>> getProductClasses(model)");
-			Mono<ClientResponse> mono = get();
+				logger.trace(">>> getProductClasses({}, {}, model)", fromIndex, toIndex);
+			Long from = null;
+			Long to = null;
+			if (fromIndex != null && fromIndex >= 0) {
+				from = fromIndex;
+			} else {
+				from = (long) 0;
+			}
+			Long count = countProductClasses(productClass, processorClass, level, visibility);
+			if (toIndex != null && from != null && toIndex > from) {
+				to = toIndex;
+			} else if (from != null) {
+				to = count;
+			}
+			Long pageSize = to - from;
+			Long deltaPage = (long) ((count % pageSize)==0?0:1);
+			Long pages = (count / pageSize) + deltaPage;
+			Long page = (from / pageSize) + 1;
+			Mono<ClientResponse> mono = get(productClass, processorClass, level, visibility, from, to);
 			DeferredResult<String> deferredResult = new DeferredResult<String>();
 			List<Object> productclasses = new ArrayList<>();
-			mono.subscribe(clientResponse -> {
+			mono.doOnError(e -> {
+				model.addAttribute("errormsg", e.getMessage());
+				deferredResult.setResult("productclass-show :: #errormsg");
+			})
+		 	.subscribe(clientResponse -> {
 				logger.trace("Now in Consumer::accept({})", clientResponse);
-				if (clientResponse.statusCode().is5xxServerError()) {
-					logger.trace(">>>Server side error (HTTP status 500)");
-					model.addAttribute("errormsg", "Server side error (HTTP status 500)");
-					deferredResult.setResult("productclass-show :: #productclasscontent");
-					logger.trace(">>DEFERREDRES 500: {}", deferredResult.getResult());
-				} else if (clientResponse.statusCode().is4xxClientError()) {
-					logger.trace(">>>Warning Header: {}", clientResponse.headers().asHttpHeaders().getFirst("Warning"));
-					model.addAttribute("errormsg", clientResponse.headers().asHttpHeaders().getFirst("Warning"));
-					deferredResult.setResult("productclass-show :: #productclasscontent");
-					logger.trace(">>DEFERREDRES 4xx: {}", deferredResult.getResult());
-				} else if (clientResponse.statusCode().is2xxSuccessful()) {
+				if (clientResponse.statusCode().is2xxSuccessful()) {
 					clientResponse.bodyToMono(List.class).subscribe(pcList -> {
 						productclasses.addAll(pcList);
 						
@@ -78,14 +97,38 @@ public class GUIProductClassController extends GUIBaseController {
 						sortSelectionRules(productclasses);
 						
 						model.addAttribute("productclasses", productclasses);
+						model.addAttribute("count", count);
+						model.addAttribute("pageSize", pageSize);
+						model.addAttribute("pageCount", pages);
+						model.addAttribute("page", page);
+						List<Long> showPages = new ArrayList<Long>();
+						Long start = Math.max(page - 4, 1);
+						Long end = Math.min(page + 4, pages);
+						if (page < 5) {
+							end = Math.min(end + (5 - page), pages);
+						}
+						if (pages - page < 5) {
+							start = Math.max(start - (4 - (pages - page)), 1);
+						}
+						for (Long i = start; i <= end; i++) {
+							showPages.add(i);
+						}
+						model.addAttribute("showPages", showPages);
 						logger.trace(model.toString() + "MODEL TO STRING");
 						logger.trace(">>>>MONO" + productclasses.toString());
 						deferredResult.setResult("productclass-show :: #productclasscontent");
 						logger.trace(">>DEFERREDRES: {}", deferredResult.getResult());
 					});
+				} else {
+					handleHTTPError(clientResponse, model);
+					deferredResult.setResult("productclass-show :: #errormsg");
 				}
 				logger.trace(">>>>MODEL" + model.toString());
 
+			},
+			e -> {
+				model.addAttribute("errormsg", e.getMessage());
+				deferredResult.setResult("productclass-show :: #errormsg");
 			});
 			logger.trace(model.toString() + "MODEL TO STRING");
 			logger.trace(">>>>MONO" + productclasses.toString());
@@ -94,11 +137,108 @@ public class GUIProductClassController extends GUIBaseController {
 			return deferredResult;
 		}
 
-		private Mono<ClientResponse> get() {
+	    private Long countProductClasses(String productType, String processorClass, String level, String visibility) {
+	    	
+			GUIAuthenticationToken auth = (GUIAuthenticationToken)SecurityContextHolder.getContext().getAuthentication();
+			String mission = auth.getMission();
+			String divider = "?";
+			String uri = "/productclasses/count";
+			if (mission != null && !mission.isEmpty()) {
+				uri += divider + "mission=" + mission;
+				divider ="&";
+			}
+			if (productType != null && !productType.isEmpty()) {
+				String [] pcs = productType.split(",");
+				for (String pc : pcs) {
+					uri += divider + "productType=" + pc;
+					divider ="&";
+				}
+			}
+			if (processorClass != null && !processorClass.isEmpty()) {
+				String [] pcs = processorClass.split(",");
+				for (String pc : pcs) {
+					uri += divider + "processorClass=" + pc;
+					divider ="&";
+				}
+			}
+			if (level != null) {
+				uri += divider + "level=" + level;
+				divider ="&";
+			}
+			if (visibility != null) {
+				uri += divider + "visibility=" + visibility;
+				divider ="&";
+			}
+			Long result = (long) -1;
+			try {
+				String resStr = serviceConnection.getFromService(serviceConfig.getProductClassManagerUrl(),
+						uri, String.class, auth.getProseoName(), auth.getPassword());
+
+				if (resStr != null && resStr.length() > 0) {
+					result = Long.valueOf(resStr);
+				}
+			} catch (RestClientResponseException e) {
+				String message = null;
+				switch (e.getRawStatusCode()) {
+				case org.apache.http.HttpStatus.SC_NOT_FOUND:
+					message = ProseoLogger.format(UIMessage.NO_MISSIONS_FOUND);
+					break;
+				case org.apache.http.HttpStatus.SC_UNAUTHORIZED:
+				case org.apache.http.HttpStatus.SC_FORBIDDEN:
+					message = ProseoLogger.format(UIMessage.NOT_AUTHORIZED, "null", "null", "null");
+					break;
+				default:
+					message = ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage());
+				}
+				System.err.println(message);
+				return result;
+			} catch (RuntimeException e) {
+				System.err.println(ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage()));
+				return result;
+			}
+			
+	        return result;
+	    }
+		private Mono<ClientResponse> get(String productType, String processorClass, String level, String visibility, Long from, Long to) {
 			GUIAuthenticationToken auth = (GUIAuthenticationToken)SecurityContextHolder.getContext().getAuthentication();
 			String mission = auth.getMission();
 			String uri = serviceConfig.getProductClassManagerUrl() + "/productclasses";
-			uri += "?mission=" + mission;
+			String divider = "?";
+			if (mission != null && !mission.isEmpty()) {
+				uri += divider + "mission=" + mission;
+				divider ="&";
+			}
+			if (productType != null && !productType.isEmpty()) {
+				String [] pcs = productType.split(",");
+				for (String pc : pcs) {
+					uri += divider + "productType=" + pc;
+					divider ="&";
+				}
+			}
+			if (processorClass != null && !processorClass.isEmpty()) {
+				String [] pcs = processorClass.split(",");
+				for (String pc : pcs) {
+					uri += divider + "processorClass=" + pc;
+					divider ="&";
+				}
+			}
+			if (level != null) {
+				uri += divider + "level=" + level;
+				divider ="&";
+			}
+			if (visibility != null) {
+				uri += divider + "visibility=" + visibility;
+				divider ="&";
+			}
+			if (from != null) {
+				uri += divider + "recordFrom=" + from;
+				divider ="&";
+			}
+			if (to != null) {
+				uri += divider + "recordTo=" + to;
+				divider ="&";
+			}
+			uri += divider + "orderBy=productType ASC";
 			logger.trace("URI " + uri);
 			Builder webclient = WebClient.builder().clientConnector(new ReactorClientHttpConnector(
 					HttpClient.create().followRedirect((req, res) -> {
@@ -113,11 +253,13 @@ public class GUIProductClassController extends GUIBaseController {
 
 		}
 		
+		@SuppressWarnings("unchecked")
 		private void sortSelectionRules(List<Object> productclasses) {
 			if (productclasses != null) {
 				for(Object o1 : productclasses) {
 					if (o1 instanceof HashMap) {
-						HashMap<String, HashMap<String, Object>> sortedList = new HashMap<String, HashMap<String, Object>>();
+						HashMap<String, HashMap<String, Object>> sortedModeList = new HashMap<String, HashMap<String, Object>>();
+						HashMap<String, HashMap<String, Object>> sortedProcessorsList = new HashMap<String, HashMap<String, Object>>();
 						HashMap<String, Object> h1 = (HashMap<String, Object>) o1;
 						Object sro = h1.get("selectionRule");
 						if (sro instanceof List) {
@@ -125,14 +267,19 @@ public class GUIProductClassController extends GUIBaseController {
 							for (Object o2 : srl) {
 								if (o2 instanceof HashMap) {
 									HashMap<?, ?> sr = (HashMap<?, ?>) o2;
-									// now we have a selection rule
-									// collect all modes in a new hash map
-									String mode = (String)sr.get("mode");
-									if (!sortedList.containsKey(mode)) {
-										HashMap<String, Object> localList = new HashMap<String, Object>();
-										localList.put("mode", mode);
-										localList.put("selRules", new ArrayList<Object>());
-										sortedList.put(mode, localList);
+									// collect all configuredProcessors
+									List<String> procs = (List<String>)sr.get("configuredProcessors");
+									if (procs == null || procs.isEmpty()) {
+										procs = new ArrayList<String>();
+										procs.add("");
+									}
+									for (String proc : procs) {
+										if (!sortedProcessorsList.containsKey(proc)) {
+											HashMap<String, Object> localList = new HashMap<String, Object>();
+											localList.put("configuredProcessor", proc);
+											localList.put("selRules", new ArrayList<Object>());
+											sortedProcessorsList.put(proc, localList);
+										}
 									}
 								}
 							}
@@ -141,11 +288,41 @@ public class GUIProductClassController extends GUIBaseController {
 									HashMap<?, ?> sr = (HashMap<?, ?>) o2;
 									// now we have a selection rule
 									// collect all modes in a new hash map
-									String mode = (String)sr.get("mode");								
-									((List<Object>)sortedList.get(mode).get("selRules")).add(sr);
+									String mode = (String)sr.get("mode");
+									if (mode == null) {
+										mode = "";
+									}
+									for (String acp : sortedProcessorsList.keySet()) {
+										if (!sortedModeList.containsKey(mode + acp)) {
+											HashMap<String, Object> localList = new HashMap<String, Object>();
+											localList.put("mode", mode);
+											localList.put("applicableConfiguredProcessor", acp);
+											localList.put("selRules", new ArrayList<Object>());
+											sortedModeList.put(mode + acp, localList);
+										}
+									}
 								}
 							}
-							for (HashMap<String, Object> modeList : sortedList.values()) {
+							for (Object o2 : srl) {
+								if (o2 instanceof HashMap) {
+									HashMap<?, ?> sr = (HashMap<?, ?>) o2;
+									// now we have a selection rule
+									// collect all modes in a new hash map
+									String mode = (String)sr.get("mode");		
+									if (mode == null) {
+										mode = "";
+									}				
+									List<String> procs = (List<String>)sr.get("configuredProcessors");
+									if (procs == null || procs.isEmpty()) {
+										procs = new ArrayList<String>();
+										procs.add("");
+									}		
+									for (String acp : procs) {
+										((List<Object>)sortedModeList.get(mode + acp).get("selRules")).add(sr);
+									}
+								}
+							}
+							for (HashMap<String, Object> modeList : sortedModeList.values()) {
 								Object listObj = modeList.get("selRules");
 								if (listObj instanceof List ) {
 									List<Object> list = (List<Object>)listObj;
@@ -153,8 +330,8 @@ public class GUIProductClassController extends GUIBaseController {
 									list.sort(oc);
 								}
 							}	
-							MapComparator mlc = new MapComparator("mode", true);
-							Collection<HashMap<String, Object>> mList = sortedList.values();
+							MapComparator mlc = new MapComparator("mode", "applicableConfiguredProcessor", true);
+							Collection<HashMap<String, Object>> mList = sortedModeList.values();
 							List<Object> cList = new ArrayList<Object>();
 							cList.addAll(mList);
 							cList.sort(mlc);

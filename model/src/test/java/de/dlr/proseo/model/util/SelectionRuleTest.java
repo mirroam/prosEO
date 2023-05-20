@@ -22,10 +22,13 @@ import java.util.TimeZone;
 import org.junit.Before;
 import org.junit.BeforeClass;
 import org.junit.Test;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import de.dlr.proseo.model.Mission;
 import de.dlr.proseo.model.ProductClass;
 import de.dlr.proseo.model.SimpleSelectionRule;
+import de.dlr.proseo.model.SimpleSelectionRuleTest;
 
 /**
  * Unit test class for SelectionRule using various valid and invalid rules and various sensing time intervals.
@@ -34,10 +37,14 @@ import de.dlr.proseo.model.SimpleSelectionRule;
  *
  */
 public class SelectionRuleTest {
+    private static final Long TEST_MISSION_ID = 1L;
 	private static final String TEST_MISSION_CODE = "S5P";
 	private static final String TEST_PRODUCT_TYPE = "AUX_CH4";
+	private static final Long TEST_PRODUCT_CLASS_ID = 4711L;
 	private static final String TEST_PRODUCT_TYPE_IR = "L1B_IR/category:UVN,revision:2.0";
+	private static final Long TEST_PRODUCT_CLASS_IR_ID = 815L;
 	private static final String TEST_PRODUCT_TYPE_ECMWF = "AUX_ECMWF48";
+	private static final Long TEST_PRODUCT_CLASS_ECMWF_ID = 333L;
 	private static String[] itemObjects = {
 			TEST_PRODUCT_TYPE + " Item 0", TEST_PRODUCT_TYPE + " Item 1", TEST_PRODUCT_TYPE + " Item 2", TEST_PRODUCT_TYPE + " Item 3",
 			TEST_PRODUCT_TYPE + " Item 4", TEST_PRODUCT_TYPE + " Item 5", TEST_PRODUCT_TYPE + " Item 6", TEST_PRODUCT_TYPE + " Item 7",
@@ -55,7 +62,13 @@ public class SelectionRuleTest {
 			"FOR " + TEST_PRODUCT_TYPE + " SELECT ValIntersect(0 H, 0 H) OR LatestValIntersect(36 H, 24 H) OPTIONAL",
 			"FOR " + TEST_PRODUCT_TYPE + " SELECT LatestValidityClosest(1 H, 1 H)",
 			"FOR " + TEST_PRODUCT_TYPE + " SELECT LatestValidityClosest(1 H, 0)",
-			"FOR " + TEST_PRODUCT_TYPE + " SELECT LatestValCover(0, 0)"
+			"FOR " + TEST_PRODUCT_TYPE + " SELECT LatestValCover(0, 0)",
+			"FOR " + TEST_PRODUCT_TYPE + " SELECT ClosestStartValidity(1 H, 0)",
+			"FOR " + TEST_PRODUCT_TYPE + " SELECT ClosestStopValidity(1 H, 0)",
+			"FOR " + TEST_PRODUCT_TYPE + " SELECT LatestStartValidity MANDATORY",
+			"FOR " + TEST_PRODUCT_TYPE + " SELECT LatestStopValidity MANDATORY",
+			"FOR " + TEST_PRODUCT_TYPE + " SELECT ValIntersectWithoutDuplicates(0 H, 0 H) MANDATORY",
+			"FOR " + TEST_PRODUCT_TYPE + " SELECT LastCreated"
 	};
 	/**
 	 *  Selection intervals, for items see {@link SelectionRuleTest#createSelectionItems()}
@@ -85,6 +98,9 @@ public class SelectionRuleTest {
 	private ProductClass productClassECMWF = new ProductClass();
 	private ProductClass targetProductClass = productClassCH4;
 
+	/** The logger for this class */
+	private static final Logger logger = LoggerFactory.getLogger(SelectionRuleTest.class);
+	
 	/**
 	 * Ensure that the time-based classes in Java handle leap seconds (e. g. 2015-06-30 23:59:60) in a graceful way
 	 * (i. e. without breaking the surrounding code by exceptions and such).
@@ -133,17 +149,23 @@ public class SelectionRuleTest {
 	@Before
 	public void setUp() throws Exception {
 		// Create required mission and product classes
+		mission.setId(TEST_MISSION_ID);
 		mission.setCode(TEST_MISSION_CODE);
-		mission.getProductClasses().addAll(Arrays.asList(productClassCH4, productClassIR, productClassECMWF));
 
+		productClassCH4.setId(TEST_PRODUCT_CLASS_ID);
 		productClassCH4.setProductType(TEST_PRODUCT_TYPE);
 		productClassCH4.setMission(mission);
 
+		productClassIR.setId(TEST_PRODUCT_CLASS_IR_ID);
 		productClassIR.setProductType(TEST_PRODUCT_TYPE_IR.split("/")[0]);
 		productClassIR.setMission(mission);
 		
+		productClassECMWF.setId(TEST_PRODUCT_CLASS_ECMWF_ID);
 		productClassECMWF.setProductType(TEST_PRODUCT_TYPE_ECMWF);
 		productClassECMWF.setMission(mission);
+		
+		mission.getProductClasses().addAll(Arrays.asList(productClassCH4, productClassIR, productClassECMWF));
+		logger.debug("Set of product classes {} set up for mission {}", mission.getProductClasses(), mission.getCode());
 	}
 
 //	/**
@@ -170,19 +192,31 @@ public class SelectionRuleTest {
 				"FOR " + TEST_PRODUCT_TYPE + " SELECT ValIntersect(0, 1) OR ValIntersect(1, 0) MINCOVER ( 70 )",
 				"FOR " + TEST_PRODUCT_TYPE + " SELECT ValIntersect(1 H, 1 D); FOR " + TEST_PRODUCT_TYPE + " SELECT ValIntersect(1 D, 1 H)",
 				"FOR " + TEST_PRODUCT_TYPE_IR + " SELECT LatestValidityClosest(2 d, 2 d)",
-				"FOR " + TEST_PRODUCT_TYPE + " SELECT LatestValCover(10 m, 10 m)"
+				"FOR " + TEST_PRODUCT_TYPE + " SELECT LatestValCover(600 s, 10 m)",
+				"FOR " + TEST_PRODUCT_TYPE_IR + " SELECT ClosestStartValidity(8800 ms, 4400 ms)",
+				"FOR " + TEST_PRODUCT_TYPE_IR + " SELECT ClosestStopValidity(10 m, 10 m)",
+				"FOR " + TEST_PRODUCT_TYPE + " SELECT LatestStartValidity",
+				"FOR " + TEST_PRODUCT_TYPE + " SELECT LatestStopValidity",
+				"FOR " + TEST_PRODUCT_TYPE + " SELECT ValIntersectWithoutDuplicates(10 m, 10 m)",
+				"FOR " + TEST_PRODUCT_TYPE + " SELECT LastCreated"
 		};
 		String[] legalResults = {
 				"FOR " + TEST_PRODUCT_TYPE + " SELECT ValIntersect(0 D, 0 D) MINCOVER(50)",
 				"FOR " + TEST_PRODUCT_TYPE + " SELECT ValIntersect(0 D, 0 D) OR LatestValidity MANDATORY",
 				"FOR " + TEST_PRODUCT_TYPE + " SELECT ValIntersect(0 D, 0 D) OR LatestValidity OPTIONAL;"
-						+ " FOR " + TEST_PRODUCT_TYPE_ECMWF + " SELECT LatestValIntersect(12 H, 24 H) MANDATORY",
+						+ " FOR " + TEST_PRODUCT_TYPE_ECMWF + " SELECT LatestValIntersect(12 H, 1 D) MANDATORY",
 				"FOR " + TEST_PRODUCT_TYPE + " SELECT LatestValIntersect(1 M, 2 S) MANDATORY",
 				"FOR " + TEST_PRODUCT_TYPE + " SELECT LatestValidity OR LatestValIntersect(2 D, 123456789 D) OPTIONAL",
 				"FOR " + TEST_PRODUCT_TYPE + " SELECT ValIntersect(1 D, 1 D) MINCOVER(70)",
-				"FOR " + TEST_PRODUCT_TYPE + " SELECT ValIntersect(24 H, 24 H) MANDATORY",
+				"FOR " + TEST_PRODUCT_TYPE + " SELECT ValIntersect(1 D, 1 D) MANDATORY",
 				"FOR " + TEST_PRODUCT_TYPE_IR + " SELECT LatestValidityClosest(0 D, 0 D) MANDATORY", // normalized delta times
-				"FOR " + TEST_PRODUCT_TYPE + " SELECT LatestValCover(10 M, 10 M) MANDATORY"
+				"FOR " + TEST_PRODUCT_TYPE + " SELECT LatestValCover(10 M, 10 M) MANDATORY",
+				"FOR " + TEST_PRODUCT_TYPE_IR + " SELECT ClosestStartValidity(4400 MS, 0 D) MANDATORY", // normalized delta times
+				"FOR " + TEST_PRODUCT_TYPE_IR + " SELECT ClosestStopValidity(0 D, 0 D) MANDATORY", // normalized delta times
+				"FOR " + TEST_PRODUCT_TYPE + " SELECT LatestStartValidity MANDATORY",
+				"FOR " + TEST_PRODUCT_TYPE + " SELECT LatestStopValidity MANDATORY",
+				"FOR " + TEST_PRODUCT_TYPE + " SELECT ValIntersectWithoutDuplicates(10 M, 10 M) MANDATORY",
+				"FOR " + TEST_PRODUCT_TYPE + " SELECT LastCreated MANDATORY"
 		};
 
 		String[] illegalRules = {
@@ -197,7 +231,13 @@ public class SelectionRuleTest {
 				"FOR " + TEST_PRODUCT_TYPE_IR + " SELECT WrongPolicy(0, 0)",			// Invalid policy name
 				"FOR " + TEST_PRODUCT_TYPE + " SELECT ValIntersect",				// Policy parameter missing
 				"FOR " + TEST_PRODUCT_TYPE + " SELECT LatestValIntersect",		// Policy parameter missing
+				"FOR " + TEST_PRODUCT_TYPE + " SELECT ClosestStartValidity",		// Policy parameter missing
+				"FOR " + TEST_PRODUCT_TYPE + " SELECT ClosestStopValidity",		// Policy parameter missing
+				"FOR " + TEST_PRODUCT_TYPE + " SELECT ValIntersectWithoutDuplicates",		// Policy parameter missing
 				"FOR " + TEST_PRODUCT_TYPE + " SELECT LatestValidity(0, 0)",		// Superfluous policy parameter
+				"FOR " + TEST_PRODUCT_TYPE + " SELECT LatestStartValidity(0, 0)",		// Superfluous policy parameter
+				"FOR " + TEST_PRODUCT_TYPE + " SELECT LatestStopValidity(0, 0)",		// Superfluous policy parameter
+				"FOR " + TEST_PRODUCT_TYPE + " SELECT LastCreated(0, 0)",		// Superfluous policy parameter
 				"FOR " + TEST_PRODUCT_TYPE + " SELECT ValIntersect(0), 0",		// Invalid policy parameter syntax
 				"FOR " + TEST_PRODUCT_TYPE + " SELECT ValIntersect(0, 0) MANDATORY OPTIONAL", // Too many options
 				"FOR " + TEST_PRODUCT_TYPE + " SELECT ValIntersect(0, 0) MINCOVER(200)", // Invalid coverage percentage
@@ -217,6 +257,12 @@ public class SelectionRuleTest {
 				"Allowed policies are",									// RULE_POLICY_INVALID_ERROR
 				"delta times must be specified",						// RULE_POLICY_TIMES_ERROR
 				"delta times must be specified",						// RULE_POLICY_TIMES_ERROR
+				"delta times must be specified",						// RULE_POLICY_TIMES_ERROR
+				"delta times must be specified",						// RULE_POLICY_TIMES_ERROR
+				"delta times must be specified",						// RULE_POLICY_TIMES_ERROR
+				"no delta times may be specified",						// RULE_POLICY_LATVAL_ERROR
+				"no delta times may be specified",						// RULE_POLICY_LATVAL_ERROR
+				"no delta times may be specified",						// RULE_POLICY_LATVAL_ERROR
 				"no delta times may be specified",						// RULE_POLICY_LATVAL_ERROR
 				"policy must follow",									// RULE_POLICY_SYNTAX_ERROR
 				"Expected end of text or",								// RULE_POLICY_END_ERROR
@@ -224,7 +270,7 @@ public class SelectionRuleTest {
 				"rule string is empty",									// RULE_EMPTY_ERROR
 				"Source product class not found"						// RULE_SOURCE_PRODUCT_CLASS_NOT_FOUND
 		};
-		int[] illegalOffsets = { 0, 32, 32, 38, 0, 12, 12, 13, 44, 31, 37, 33, 32, 38, 47, 0, 4 };
+		int[] illegalOffsets = { 0, 32, 32, 38, 0, 12, 12, 13, 44, 31, 37, 39, 38, 48, 33, 38, 37, 30, 32, 38, 47, 0, 4 };
 		
 		// Test legal rules
 		for (int i = 0; i < legalRules.length; ++i) {
@@ -297,8 +343,8 @@ public class SelectionRuleTest {
 		String rule4 = "FOR p1 SELECT LatestValCover(0, 1); FOR p2 SELECT LatestValidityClosest(1 h, 2 h); FOR p3 SELECT LatestValidity; FOR p4 SELECT LatestValIntersect(0, 1)";
 		String result2 =
 				"FOR p1 SELECT LatestValCover(1 D, 1 D) MANDATORY; " +
-				"FOR p2 SELECT LatestValidityClosest(0 H, 60 M) MANDATORY; " +
-				"FOR p3 SELECT LatestValidityClosest(60 M, 0 D) OR LatestValidity MANDATORY; " +
+				"FOR p2 SELECT LatestValidityClosest(0 D, 1 H) MANDATORY; " +
+				"FOR p3 SELECT LatestValidityClosest(1 H, 0 D) OR LatestValidity MANDATORY; " +
 				"FOR p4 SELECT LatestValCover(1 D, 0 D) OR LatestValIntersect(0 D, 1 D) MANDATORY";
 		
 		try {
@@ -526,7 +572,55 @@ public class SelectionRuleTest {
 				  ERROR_RESULT,
 				  ERROR_RESULT,
 				  itemObjects[1],	// specially constructed test case for LatestValCover
-				  itemObjects[1] }
+				  itemObjects[1] },
+				// ClosestStartValidity asymmetrical (1 h, 0)
+				{ itemObjects[3],
+				  itemObjects[2],
+				  itemObjects[0],
+				  itemObjects[2],
+				  itemObjects[2],
+				  itemObjects[3],
+				  itemObjects[3] },	// specially constructed test case for LatestValidityClosest
+				// ClosestStopValidity asymmetrical (1 h, 0)
+				{ itemObjects[0],
+				  itemObjects[0],
+				  itemObjects[0],
+				  itemObjects[2],
+				  itemObjects[2],
+				  itemObjects[0],
+				  itemObjects[0] },	// specially constructed test case for LatestValidityClosest
+				// LatestStartValidity
+				{ itemObjects[2],
+				  itemObjects[2],
+				  itemObjects[2],
+				  itemObjects[2],
+				  itemObjects[2],
+				  itemObjects[2],
+				  itemObjects[2] },
+				// LatestStopValidity
+				{ itemObjects[2],
+				  itemObjects[2],
+				  itemObjects[2],
+				  itemObjects[2],
+				  itemObjects[2],
+				  itemObjects[2],
+				  itemObjects[2] },
+				// ValIntersectWithoutDuplicates
+				{ ERROR_RESULT,
+				  ERROR_RESULT,
+				  ERROR_RESULT,
+				  itemObjects[2],
+				  ERROR_RESULT,
+				  ERROR_RESULT,
+				  ERROR_RESULT },
+				// LastCreated
+				{ itemObjects[2],
+				  itemObjects[2],
+				  itemObjects[2],
+				  itemObjects[2],
+				  itemObjects[2],
+				  itemObjects[2],
+				  itemObjects[2] }
 		};
 
 		// Perform tests on valid input
@@ -705,7 +799,56 @@ public class SelectionRuleTest {
 				  ERROR_RESULT,
 				  ERROR_RESULT,
 				  itemObjects[1],	// specially constructed test case for LatestValCover
-				  itemObjects[1] }
+				  itemObjects[1] },
+
+				// ClosestStartValidity asymmetrical (1 h, 0)
+				{ itemObjects[3],
+				  itemObjects[2],
+				  itemObjects[0],
+				  itemObjects[2],
+				  itemObjects[2],
+				  itemObjects[3],
+				  itemObjects[3] },	// specially constructed test case for LatestValidityClosest
+				// ClosestStopValidity asymmetrical (1 h, 0)
+				{ itemObjects[0],
+				  itemObjects[0],
+				  itemObjects[0],
+				  itemObjects[2],
+				  itemObjects[2],
+				  itemObjects[0],
+				  itemObjects[0] },	// specially constructed test case for LatestValidityClosest
+				// LatestStartValidity
+				{ itemObjects[2],
+				  itemObjects[2],
+				  itemObjects[2],
+				  itemObjects[2],
+				  itemObjects[2],
+				  itemObjects[2],
+				  itemObjects[2] },
+				// LatestStopValidity
+				{ itemObjects[2],
+				  itemObjects[2],
+				  itemObjects[2],
+				  itemObjects[2],
+				  itemObjects[2],
+				  itemObjects[2],
+				  itemObjects[2] },
+				// ValIntersectWithoutDuplicates
+				{ concatenate(itemObjects[0], itemObjects[1],                 itemObjects[3]),
+					  concatenate(itemObjects[0], itemObjects[1], itemObjects[2], itemObjects[3]),
+					  concatenate(itemObjects[0], itemObjects[1]                                ),
+					  concatenate(                                itemObjects[2]                ),
+					  ERROR_RESULT,
+					  concatenate(itemObjects[0], itemObjects[1],                 itemObjects[3]),
+					  concatenate(itemObjects[0], itemObjects[1],                 itemObjects[3]) },
+				// LastCreated
+				{ itemObjects[2],
+				  itemObjects[2],
+				  itemObjects[2],
+				  itemObjects[2],
+				  itemObjects[2],
+				  itemObjects[2],
+				  itemObjects[2] }
 		};
 		
 		// Perform tests on valid input
@@ -867,113 +1010,6 @@ public class SelectionRuleTest {
 	}
 
 	/**
-	 * Test method for {@link de.dlr.proseo.model.util.SelectionRule#asPlQueryCondition(Instant, Instant)}.
-	 */
-	@Test
-	public final void testAsPlQueryCondition() {
-		System.out.println("\n*** Starting test for asPlQueryCondition() ***");
-
-		final String invariantQueryPart = "select startTime, stopTime from " + TEST_PRODUCT_TYPE + " where ";
-		final String invariantQueryPartIR = "select startTime, stopTime from " + TEST_PRODUCT_TYPE_IR.split("/")[0] + " where ";
-		String[] expectedResults = {
-			invariantQueryPart + "(startTime <= '2016-11-02T00:00:05' and stopTime >= '2016-11-02T00:00:00')",
-			invariantQueryPart + "(startTime <= '2016-11-02T00:00:05' and stopTime >= '2016-11-02T00:00:00')",
-			invariantQueryPart + "there exists no corresponding " + TEST_PRODUCT_TYPE + " with greater startTime",
-			invariantQueryPart + "(startTime <= '2016-11-03T00:00:05' and stopTime >= '2016-11-01T12:00:00')",
-			invariantQueryPart + "(startTime <= '2016-11-02T00:00:05' and stopTime >= '2016-11-02T00:00:00')",
-			"", // not a rule for TEST_PRODUCT_TYPE
-			invariantQueryPart 
-				+ "((startTime <= '2016-11-02T00:00:05' and stopTime >= '2016-11-02T00:00:00') or "
-				+ "there exists no corresponding " + TEST_PRODUCT_TYPE + " with greater startTime)",
-			invariantQueryPart 
-				+ "((startTime <= '2016-11-02T00:00:05' and stopTime >= '2016-11-02T00:00:00') or "
-				+ "(startTime <= '2016-11-03T00:00:05' and stopTime >= '2016-10-31T12:00:00'))",
-			invariantQueryPart
-				+ "((startTime <= '2016-11-02T00:00:02' and there exists no corresponding " + TEST_PRODUCT_TYPE 
-					+ " with greater startTime where startTime <= '2016-11-02T00:00:02') or "
-				+  "(startTime > '2016-11-02T00:00:02' and there exists no corresponding " + TEST_PRODUCT_TYPE 
-					+ " with less startTime where startTime > '2016-11-02T00:00:02'))",
-			invariantQueryPart
-				+ "((startTime <= '2016-11-01T23:30:02' and there exists no corresponding " + TEST_PRODUCT_TYPE 
-					+ " with greater startTime where startTime <= '2016-11-01T23:30:02') or "
-				+  "(startTime > '2016-11-01T23:30:02' and there exists no corresponding " + TEST_PRODUCT_TYPE 
-					+ " with less startTime where startTime > '2016-11-01T23:30:02'))",
-			invariantQueryPart + "(startTime <= '2016-11-02T00:00:00' and stopTime >= '2016-11-02T00:00:05')"
-		};
-		
-		// Perform tests on valid input
-		for (int i = 0; i < rules.length; ++i) {
-			Instant startTime = startStopTimes[0][0];
-			Instant stopTime = startStopTimes[0][1];
-			Map<String, String> result = null;
-			try {
-				System.out.println(String.format("Testing rule %d and time interval 0", i));
-				result = SelectionRule.parseSelectionRule(targetProductClass, rules[i])
-						.asPlQueryCondition(startTime, stopTime);
-				String resultString = ( null == result.get(TEST_PRODUCT_TYPE) ? "" : result.get(TEST_PRODUCT_TYPE) );
-				System.out.println(String.format("... result is: %s", resultString));
-				assertEquals(String.format("Unexpected PL query condition for rule %d and time interval 0: ", i),
-						expectedResults[i], resultString);
-			} catch (IllegalArgumentException | ParseException e) {
-				fail(String.format("Test with rule %d and time interval 0 throws exception %s", i, e.getMessage()));
-			}
-		}
-		
-		// Perform tests on product type with parameters (valid input)
-		String[] parameterizedRules = {
-			"FOR " + TEST_PRODUCT_TYPE_IR + " SELECT LatestValidityClosest(1 H, 1 H)",
-			"FOR " + TEST_PRODUCT_TYPE_IR + " SELECT LatestValidity"
-		};
-		String[] expectedResultsWithParams = {
-			invariantQueryPartIR
-				+ "(((startTime <= '2016-11-02T00:00:02' and there exists no corresponding " + TEST_PRODUCT_TYPE_IR.split("/")[0] 
-					+ " with greater startTime where startTime <= '2016-11-02T00:00:02') or "
-				+  "(startTime > '2016-11-02T00:00:02' and there exists no corresponding " + TEST_PRODUCT_TYPE_IR.split("/")[0] 
-					+ " with less startTime where startTime > '2016-11-02T00:00:02')) and "
-				+ "category = 'UVN' and revision = '2.0')",
-			invariantQueryPartIR
-				+ "(there exists no corresponding " + TEST_PRODUCT_TYPE_IR.split("/")[0] + " with greater startTime and "
-				+ "category = 'UVN' and revision = '2.0')"
-		};
-		for (int i = 0; i < parameterizedRules.length; ++i) {
-			Instant startTime = startStopTimes[0][0];
-			Instant stopTime = startStopTimes[0][1];
-			Map<String, String> result = null;
-			try {
-				System.out.println(String.format("Testing parameterized rule %d and time interval 0", i));
-				result = SelectionRule.parseSelectionRule(targetProductClass, parameterizedRules[i])
-						.asPlQueryCondition(startTime, stopTime);
-				String resultString = ( null == result.get(TEST_PRODUCT_TYPE_IR) ? "" : result.get(TEST_PRODUCT_TYPE_IR) );
-				System.out.println(String.format("... result is: %s", resultString));
-				assertEquals(String.format("Unexpected PL query condition for rule %d and time interval 0: ", i),
-						expectedResultsWithParams[i], resultString);
-			} catch (IllegalArgumentException | ParseException e) {
-				fail(String.format("Test with rule %d and time interval 0 throws exception %s", i, e.getMessage()));
-			}
-		}
-		
-		// Perform tests on invalid input
-		SelectionRule rule = null;
-		try {
-			rule = SelectionRule.parseSelectionRule(targetProductClass, rules[0]);
-		} catch (IllegalArgumentException | ParseException e) {
-			fail(String.format("Parsing of rule %d throws exception %s", e.getMessage()));
-		}
-		try {
-			rule.asPlQueryCondition(null, Instant.now());
-			fail("Failure expected on 'null' start time");
-		} catch (IllegalArgumentException e) {
-			// OK
-		}
-		try {
-			rule.asPlQueryCondition(Instant.now(), null);
-			fail("Failure expected on 'null' stop time");
-		} catch (IllegalArgumentException e) {
-			// OK
-		}
-	}
-
-	/**
 	 * Test method for {@link de.dlr.proseo.model.util.SelectionRule#toString()}.
 	 */
 	@Test
@@ -983,7 +1019,7 @@ public class SelectionRuleTest {
 			SelectionRule selectionRule = SelectionRule.parseSelectionRule(
 					targetProductClass, "FOR " + TEST_PRODUCT_TYPE + " SELECT ValIntersect(1 H, 1 D); FOR " + TEST_PRODUCT_TYPE + " SELECT ValIntersect(1 D, 1 H)");
 			assertEquals("Unexpected string value for rule: ",
-					"FOR " + TEST_PRODUCT_TYPE + " SELECT ValIntersect(24 H, 24 H) MANDATORY", selectionRule.toString());
+					"FOR " + TEST_PRODUCT_TYPE + " SELECT ValIntersect(1 D, 1 D) MANDATORY", selectionRule.toString());
 		} catch (ParseException e) {
 			fail(String.format("No ParseException expected for legal rule, error message is '%s', offset is %d",
 					e.getMessage(), e.getErrorOffset()));

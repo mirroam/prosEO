@@ -8,7 +8,6 @@ package de.dlr.proseo.ingestor.rest;
 import java.io.UnsupportedEncodingException;
 import java.net.URLDecoder;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Base64;
 import java.util.ConcurrentModificationException;
 import java.util.List;
@@ -17,20 +16,23 @@ import javax.persistence.EntityNotFoundException;
 import javax.persistence.NoResultException;
 import javax.validation.Valid;
 import javax.ws.rs.ProcessingException;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.slf4j.event.Level;
+
+import org.hibernate.exception.LockAcquisitionException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
-import de.dlr.proseo.ingestor.IngestorConfiguration;
+import de.dlr.proseo.ingestor.IngestorSecurityConfig;
+import de.dlr.proseo.ingestor.PlannerSemaphoreClient;
 import de.dlr.proseo.ingestor.rest.model.IngestorProduct;
 import de.dlr.proseo.ingestor.rest.model.RestProduct;
 import de.dlr.proseo.ingestor.rest.model.RestProductFile;
+import de.dlr.proseo.logging.http.*;
+import de.dlr.proseo.logging.logger.ProseoLogger;
+import de.dlr.proseo.logging.messages.GeneralMessage;
+import de.dlr.proseo.logging.messages.IngestorMessage;
 import de.dlr.proseo.model.ProcessingFacility;
-import de.dlr.proseo.model.service.RepositoryService;
 
 /**
  * Spring MVC controller for the prosEO Ingestor; implements the services required to ingest
@@ -40,124 +42,24 @@ import de.dlr.proseo.model.service.RepositoryService;
  */
 @Component
 public class IngestControllerImpl implements IngestController {
-
-
-	/* Message ID constants */
-	private static final int MSG_ID_INVALID_FACILITY = 2051;
-	private static final int MSG_ID_PRODUCTS_INGESTED = 2058;
-	private static final int MSG_ID_AUTH_MISSING_OR_INVALID = 2056;
-	private static final int MSG_ID_NOTIFICATION_FAILED = 2071;
-	// private static final int MSG_ID_NOT_IMPLEMENTED = 9000;
-	private static final int MSG_ID_EXCEPTION_THROWN = 9001;
-	
-	/* Message string constants */
-	private static final String MSG_INVALID_PROCESSING_FACILITY = "(E%d) Invalid processing facility %s for ingestion";
-	private static final String MSG_EXCEPTION_THROWN = "(E%d) Exception thrown: %s";
-	private static final String MSG_AUTH_MISSING_OR_INVALID = "(E%d) Basic authentication missing or invalid: %s";
-	private static final String MSG_NOTIFICATION_FAILED = "(E%d) Notification of Production Planner failed (cause: %s)";
-
-	private static final String MSG_PRODUCTS_INGESTED = "(I%d) %d products ingested in processing facility %s";
-	
-	private static final String HTTP_HEADER_WARNING = "Warning";
-	private static final String HTTP_MSG_PREFIX = "199 proseo-ingestor ";
 	
 	/** A logger for this class */
-	private static Logger logger = LoggerFactory.getLogger(IngestControllerImpl.class);
+	private static ProseoLogger logger = new ProseoLogger(IngestControllerImpl.class);
+	private static ProseoHttp http = new ProseoHttp(logger, HttpPrefix.INGESTOR);
 	
-	/** Ingestor configuration */
+	/** Client to request/release semaphores from Production Planner */
 	@Autowired
-	IngestorConfiguration ingestorConfig;
-	
+	private PlannerSemaphoreClient semaphoreClient;
+
 	/** Product ingestor */
 	@Autowired
-	ProductIngestor productIngestor;
+	private ProductIngestor productIngestor;
 	
+	/** Security configuration for Ingestor */
+	@Autowired
+	private IngestorSecurityConfig securityConfig;
+			
 	/**
-	 * Create and log a formatted message at the given level
-	 * 
-	 * @param level the logging level to use
-	 * @param messageFormat the message text with parameter placeholders in String.format() style
-	 * @param messageId a (unique) message id
-	 * @param messageParameters the message parameters (optional, depending on the message format)
-	 * @return a formatted info mesage
-	 */
-	private String log(Level level, String messageFormat, int messageId, Object... messageParameters) {
-		// Prepend message ID to parameter list
-		List<Object> messageParamList = new ArrayList<>(Arrays.asList(messageParameters));
-		messageParamList.add(0, messageId);
-
-		// Log the error message
-		String message = String.format(messageFormat, messageParamList.toArray());
-		if (Level.ERROR.equals(level)) {
-			logger.error(message);
-		} else if (Level.WARN.equals(level)) {
-			logger.warn(message);
-		} else {
-			logger.info(message);
-		}
-
-		return message;
-	}
-
-	/**
-	 * Create and log a formatted informational message
-	 * 
-	 * @param messageFormat the message text with parameter placeholders in String.format() style
-	 * @param messageId a (unique) message id
-	 * @param messageParameters the message parameters (optional, depending on the message format)
-	 * @return a formatted info mesage
-	 */
-	private String logInfo(String messageFormat, int messageId, Object... messageParameters) {
-		return log(Level.INFO, messageFormat, messageId, messageParameters);
-	}
-	
-	/**
-	 * Create and log a formatted error message
-	 * 
-	 * @param messageFormat the message text with parameter placeholders in String.format() style
-	 * @param messageId a (unique) message id
-	 * @param messageParameters the message parameters (optional, depending on the message format)
-	 * @return a formatted error message
-	 */
-	private String logError(String messageFormat, int messageId, Object... messageParameters) {
-		return log(Level.ERROR, messageFormat, messageId, messageParameters);
-	}
-	
-	/**
-	 * Create an HTTP "Warning" header with the given text message
-	 * 
-	 * @param message the message text
-	 * @return an HttpHeaders object with a warning message
-	 */
-	private HttpHeaders errorHeaders(String message) {
-		HttpHeaders responseHeaders = new HttpHeaders();
-		responseHeaders.set(HTTP_HEADER_WARNING, HTTP_MSG_PREFIX + message.replaceAll("\n", " "));
-		return responseHeaders;
-	}
-	
-	/**
-	 * Parse an HTTP authentication header into username and password
-	 * @param authHeader the authentication header to parse
-	 * @return a string array containing the username and the password
-	 * @throws IllegalArgumentException if the authentication header cannot be parsed
-	 */
-	private String[] parseAuthenticationHeader(String authHeader) throws IllegalArgumentException {
-		if (logger.isTraceEnabled()) logger.trace(">>> parseAuthenticationHeader({})", authHeader);
-
-		if (null == authHeader) {
-			String message = logError(MSG_AUTH_MISSING_OR_INVALID, MSG_ID_AUTH_MISSING_OR_INVALID, authHeader);
-			throw new IllegalArgumentException (message);
-		}
-		String[] authParts = authHeader.split(" ");
-		if (2 != authParts.length || !"Basic".equals(authParts[0])) {
-			String message = logError(MSG_AUTH_MISSING_OR_INVALID, MSG_ID_AUTH_MISSING_OR_INVALID, authHeader);
-			throw new IllegalArgumentException (message);
-		}
-		String[] userPassword = (new String(Base64.getDecoder().decode(authParts[1]))).split(":"); // guaranteed to work as per BasicAuth specification
-		return userPassword;
-	}
-
-    /**
      * Ingest all given products into the storage manager of the given processing facility. If the ID of a product to ingest
      * is null or 0 (zero), then the product will be created, otherwise a matching product will be looked up and updated.
      * 
@@ -166,6 +68,8 @@ public class IngestControllerImpl implements IngestController {
      * ingested products, should it not have been notified.
      * 
      * @param processingFacility the processing facility to ingest products to
+     * @param copyFiles indicates, whether to copy the files to a different storage area
+     *      (default "true"; only applicable if source and target storage type are the same)
      * @param ingestorProducts a list of product descriptions with product file locations
      * @param httpHeaders the HTTP request headers (injected)
      * @return HTTP status "CREATED" and a Json list of the products updated and/or created including their product files or
@@ -174,7 +78,7 @@ public class IngestControllerImpl implements IngestController {
      *         HTTP status "INTERNAL_SERVER_ERROR", if the communication to the Storage Manager or to the Production Planner failed
      */
 	@Override
-	public ResponseEntity<List<RestProduct>> ingestProducts(String processingFacility, @Valid List<IngestorProduct> ingestorProducts,
+	public ResponseEntity<List<RestProduct>> ingestProducts(String processingFacility, Boolean copyFiles, @Valid List<IngestorProduct> ingestorProducts,
 			HttpHeaders httpHeaders) {
 		if (logger.isTraceEnabled()) logger.trace(">>> ingestProducts({}, IngestorProduct[{}])", processingFacility, ingestorProducts.size());
 		
@@ -182,48 +86,53 @@ public class IngestControllerImpl implements IngestController {
 		try {
 			processingFacility = URLDecoder.decode(processingFacility, "UTF-8");
 		} catch (UnsupportedEncodingException e) {
-			return new ResponseEntity<>(
-					errorHeaders(logError(MSG_EXCEPTION_THROWN, MSG_ID_EXCEPTION_THROWN, e.getClass().toString() + ": " + e.getMessage())), 
+			return new ResponseEntity<>(http.errorHeaders(logger.log(GeneralMessage.EXCEPTION_ENCOUNTERED, e)),
 					HttpStatus.INTERNAL_SERVER_ERROR);
 		}
-		final ProcessingFacility facility = RepositoryService.getFacilityRepository().findByName(processingFacility);
+	
+		final ProcessingFacility facility = productIngestor.getFacilityByName(processingFacility);
 		if (null == facility) {
 			return new ResponseEntity<>(
-					errorHeaders(logError(MSG_INVALID_PROCESSING_FACILITY, MSG_ID_INVALID_FACILITY, processingFacility)), 
+					http.errorHeaders(logger.log(IngestorMessage.INVALID_FACILITY, processingFacility)),
 					HttpStatus.BAD_REQUEST);
 		}
 		
 		// Get username and password from HTTP Authentication header for authentication with Production Planner
-		String[] userPassword = parseAuthenticationHeader(httpHeaders.getFirst(HttpHeaders.AUTHORIZATION));
+		String[] userPassword = securityConfig.parseAuthenticationHeader(httpHeaders.getFirst(HttpHeaders.AUTHORIZATION));
 		
 		// Loop over all products to ingest
 		List<RestProduct> result = new ArrayList<>();
 
 		for (IngestorProduct ingestorProduct: ingestorProducts) {
 			try {
-				RestProduct restProduct = productIngestor.ingestProduct(facility, ingestorProduct, userPassword[0], userPassword[1]);
+				semaphoreClient.acquireSemaphore(userPassword[0], userPassword[1]);
+				RestProduct restProduct = productIngestor.ingestProduct(facility, copyFiles, ingestorProduct, userPassword[0], userPassword[1]);
 				result.add(restProduct);
 				ingestorProduct.setId(restProduct.getId());
 				if (logger.isTraceEnabled()) logger.trace("... product ingested, now notifying planner");
 			} catch (ProcessingException e) {
-				return new ResponseEntity<>(errorHeaders(e.getMessage()), HttpStatus.INTERNAL_SERVER_ERROR);
+				return new ResponseEntity<>(http.errorHeaders(e.getMessage()), HttpStatus.INTERNAL_SERVER_ERROR);
 			} catch (IllegalArgumentException e) {
-				return new ResponseEntity<>(errorHeaders(e.getMessage()), HttpStatus.BAD_REQUEST);
+				return new ResponseEntity<>(http.errorHeaders(e.getMessage()), HttpStatus.BAD_REQUEST);
 			} catch (SecurityException e) {
-				return new ResponseEntity<>(errorHeaders(e.getMessage()), HttpStatus.FORBIDDEN);
+				return new ResponseEntity<>(http.errorHeaders(e.getMessage()), HttpStatus.FORBIDDEN);
+			} finally {
+				semaphoreClient.releaseSemaphore(userPassword[0], userPassword[1]);
 			}
+			
 			try {
-				productIngestor.notifyPlanner(userPassword[0], userPassword[1], ingestorProduct);
+				productIngestor.notifyPlanner(userPassword[0], userPassword[1], ingestorProduct, facility.getId());
 				if (logger.isTraceEnabled()) logger.trace("... planner notification successful");
 			} catch (Exception e) {
 				// If notification fails, log warning, but otherwise ignore
-				log(Level.WARN, MSG_NOTIFICATION_FAILED, MSG_ID_NOTIFICATION_FAILED, e.getMessage());
+				logger.log(IngestorMessage.NOTIFICATION_FAILED, e.getMessage());
 			}
 		}
 		
-		logInfo(MSG_PRODUCTS_INGESTED, MSG_ID_PRODUCTS_INGESTED, result.size(), processingFacility);
+		logger.log(IngestorMessage.PRODUCTS_INGESTED, result.size(), processingFacility);
 
 		return new ResponseEntity<>(result, HttpStatus.CREATED);
+
 	}
 
     /**
@@ -245,22 +154,22 @@ public class IngestControllerImpl implements IngestController {
 			processingFacility = URLDecoder.decode(processingFacility, "UTF-8");
 		} catch (UnsupportedEncodingException e) {
 			return new ResponseEntity<>(
-					errorHeaders(logError(MSG_EXCEPTION_THROWN, MSG_ID_EXCEPTION_THROWN, e.getClass().toString() + ": " + e.getMessage())), 
+					http.errorHeaders(logger.log(GeneralMessage.EXCEPTION_ENCOUNTERED, e)), 
 					HttpStatus.INTERNAL_SERVER_ERROR);
 		}
-		final ProcessingFacility facility = RepositoryService.getFacilityRepository().findByName(processingFacility);
+		final ProcessingFacility facility = productIngestor.getFacilityByName(processingFacility);
 		if (null == facility) {
 			return new ResponseEntity<>(
-					errorHeaders(logError(MSG_INVALID_PROCESSING_FACILITY, MSG_ID_INVALID_FACILITY, processingFacility)), 
+					http.errorHeaders(logger.log(IngestorMessage.INVALID_FACILITY, processingFacility)), 
 					HttpStatus.BAD_REQUEST);
 		}
 		
 		try {
 			return new ResponseEntity<>(productIngestor.getProductFile(productId, facility), HttpStatus.CREATED);
 		} catch (NoResultException e) {
-			return new ResponseEntity<>(errorHeaders(e.getMessage()), HttpStatus.NOT_FOUND);
+			return new ResponseEntity<>(http.errorHeaders(e.getMessage()), HttpStatus.NOT_FOUND);
 		} catch (SecurityException e) {
-			return new ResponseEntity<>(errorHeaders(e.getMessage()), HttpStatus.FORBIDDEN);
+			return new ResponseEntity<>(http.errorHeaders(e.getMessage()), HttpStatus.FORBIDDEN);
 		}
 	}
 
@@ -291,36 +200,42 @@ public class IngestControllerImpl implements IngestController {
 			processingFacility = URLDecoder.decode(processingFacility, "UTF-8");
 		} catch (UnsupportedEncodingException e) {
 			return new ResponseEntity<>(
-					errorHeaders(logError(MSG_EXCEPTION_THROWN, MSG_ID_EXCEPTION_THROWN, e.getClass().toString() + ": " + e.getMessage())), 
+					http.errorHeaders(logger.log(GeneralMessage.EXCEPTION_ENCOUNTERED, e)), 
 					HttpStatus.INTERNAL_SERVER_ERROR);
 		}
-		final ProcessingFacility facility = RepositoryService.getFacilityRepository().findByName(processingFacility);
+		final ProcessingFacility facility = productIngestor.getFacilityByName(processingFacility);
 		if (null == facility) {
 			return new ResponseEntity<>(
-					errorHeaders(logError(MSG_INVALID_PROCESSING_FACILITY, MSG_ID_INVALID_FACILITY, processingFacility)), 
+					http.errorHeaders(logger.log(IngestorMessage.INVALID_FACILITY, processingFacility)), 
 					HttpStatus.BAD_REQUEST);
 		}
 		
 		// Get username and password from HTTP Authentication header for authentication with Production Planner
-		String[] userPassword = parseAuthenticationHeader(httpHeaders.getFirst(HttpHeaders.AUTHORIZATION));
+		String[] userPassword = securityConfig.parseAuthenticationHeader(httpHeaders.getFirst(HttpHeaders.AUTHORIZATION));
 		
 		RestProductFile restProductFile = null;
 		try {
+			semaphoreClient.acquireSemaphore(userPassword[0], userPassword[1]);
 			restProductFile = productIngestor.ingestProductFile(
 						productId, facility, productFile, userPassword[0], userPassword[1]);
 		} catch (ProcessingException e) {
-			return new ResponseEntity<>(errorHeaders(e.getMessage()), HttpStatus.INTERNAL_SERVER_ERROR);
+			return new ResponseEntity<>(http.errorHeaders(e.getMessage()), HttpStatus.INTERNAL_SERVER_ERROR);
 		} catch (IllegalArgumentException e) {
-			return new ResponseEntity<>(errorHeaders(e.getMessage()), HttpStatus.BAD_REQUEST);
+			return new ResponseEntity<>(http.errorHeaders(e.getMessage()), HttpStatus.BAD_REQUEST);
 		} catch (SecurityException e) {
-			return new ResponseEntity<>(errorHeaders(e.getMessage()), HttpStatus.FORBIDDEN);
+			return new ResponseEntity<>(http.errorHeaders(e.getMessage()), HttpStatus.FORBIDDEN);
+		} catch (LockAcquisitionException e) {
+			e.printStackTrace();
+			return new ResponseEntity<>(http.errorHeaders(e.getMessage()), HttpStatus.INTERNAL_SERVER_ERROR);
+		} finally {
+			semaphoreClient.releaseSemaphore(userPassword[0], userPassword[1]);
 		}
 		
 		try {
-			productIngestor.notifyPlanner(userPassword[0], userPassword[1], restProductFile);
+			productIngestor.notifyPlanner(userPassword[0], userPassword[1], restProductFile, facility.getId());
 		} catch (Exception e) {
 			// If notification fails, log warning, but otherwise ignore
-			log(Level.WARN, MSG_NOTIFICATION_FAILED, MSG_ID_NOTIFICATION_FAILED, e.getMessage());
+			logger.log(IngestorMessage.NOTIFICATION_FAILED, e);
 		}
 
 		return new ResponseEntity<>(restProductFile, HttpStatus.CREATED);
@@ -331,6 +246,7 @@ public class IngestControllerImpl implements IngestController {
      * 
      * @param productId the ID of the product to retrieve
      * @param processingFacility the name of the processing facility, from which the files shall be deleted
+     * @param eraseFiles erase the data file(s) from the storage area (default "true")
      * @param httpHeaders the HTTP request headers (injected)
 	 * @return a response entity with HTTP status "NO_CONTENT", if the deletion was successful, or
 	 *         HTTP status "NOT_FOUND", if the processing facility, the product or the product file did not exist, or
@@ -340,7 +256,7 @@ public class IngestControllerImpl implements IngestController {
     *         HTTP status "INTERNAL_SERVER_ERROR", if the communication to the Storage Manager or to the Production Planner failed
      */
 	@Override
-	public ResponseEntity<?> deleteProductFile(Long productId, String processingFacility, HttpHeaders httpHeaders) {
+	public ResponseEntity<?> deleteProductFile(Long productId, String processingFacility, Boolean eraseFiles, HttpHeaders httpHeaders) {
 		if (logger.isTraceEnabled()) logger.trace(">>> deleteProductFile({}, {})", productId, processingFacility);
 
 		// Check whether the given processing facility is valid
@@ -348,29 +264,29 @@ public class IngestControllerImpl implements IngestController {
 			processingFacility = URLDecoder.decode(processingFacility, "UTF-8");
 		} catch (UnsupportedEncodingException e) {
 			return new ResponseEntity<>(
-					errorHeaders(logError(MSG_EXCEPTION_THROWN, MSG_ID_EXCEPTION_THROWN, e.getClass().toString() + ": " + e.getMessage())), 
+					http.errorHeaders(logger.log(GeneralMessage.EXCEPTION_ENCOUNTERED, e)),
 					HttpStatus.INTERNAL_SERVER_ERROR);
 		}
-		final ProcessingFacility facility = RepositoryService.getFacilityRepository().findByName(processingFacility);
+		final ProcessingFacility facility = productIngestor.getFacilityByName(processingFacility);
 		if (null == facility) {
 			return new ResponseEntity<>(
-					errorHeaders(logError(MSG_INVALID_PROCESSING_FACILITY, MSG_ID_INVALID_FACILITY, processingFacility)), 
+					http.errorHeaders(logger.log(IngestorMessage.INVALID_FACILITY, processingFacility)), 
 					HttpStatus.NOT_FOUND);
 		}
 		
 		try {
-			productIngestor.deleteProductFile(productId, facility);
+			productIngestor.deleteProductFile(productId, facility, eraseFiles);
 			return new ResponseEntity<>(new HttpHeaders(), HttpStatus.NO_CONTENT);
 		} catch (EntityNotFoundException e) {
-			return new ResponseEntity<>(errorHeaders(e.getMessage()), HttpStatus.NOT_FOUND);
+			return new ResponseEntity<>(http.errorHeaders(e.getMessage()), HttpStatus.NOT_FOUND);
 		} catch (IllegalArgumentException e) {
-			return new ResponseEntity<>(errorHeaders(e.getMessage()), HttpStatus.BAD_REQUEST);
+			return new ResponseEntity<>(http.errorHeaders(e.getMessage()), HttpStatus.BAD_REQUEST);
 		} catch (ProcessingException e) {
-			return new ResponseEntity<>(errorHeaders(e.getMessage()), HttpStatus.INTERNAL_SERVER_ERROR);
+			return new ResponseEntity<>(http.errorHeaders(e.getMessage()), HttpStatus.INTERNAL_SERVER_ERROR);
 		} catch (SecurityException e) {
-			return new ResponseEntity<>(errorHeaders(e.getMessage()), HttpStatus.FORBIDDEN);
+			return new ResponseEntity<>(http.errorHeaders(e.getMessage()), HttpStatus.FORBIDDEN);
 		} catch (RuntimeException e) {
-			return new ResponseEntity<>(errorHeaders(e.getMessage()), HttpStatus.NOT_MODIFIED);
+			return new ResponseEntity<>(http.errorHeaders(e.getMessage()), HttpStatus.NOT_MODIFIED);
 		}
 	}
 
@@ -397,26 +313,26 @@ public class IngestControllerImpl implements IngestController {
 			processingFacility = URLDecoder.decode(processingFacility, "UTF-8");
 		} catch (UnsupportedEncodingException e) {
 			return new ResponseEntity<>(
-					errorHeaders(logError(MSG_EXCEPTION_THROWN, MSG_ID_EXCEPTION_THROWN, e.getClass().toString() + ": " + e.getMessage())), 
-					HttpStatus.INTERNAL_SERVER_ERROR);
+					http.errorHeaders(logger.log(GeneralMessage.EXCEPTION_ENCOUNTERED, e)),
+							HttpStatus.INTERNAL_SERVER_ERROR);
 		}
-		final ProcessingFacility facility = RepositoryService.getFacilityRepository().findByName(processingFacility);
+		final ProcessingFacility facility = productIngestor.getFacilityByName(processingFacility);
 		if (null == facility) {
 			return new ResponseEntity<>(
-					errorHeaders(logError(MSG_INVALID_PROCESSING_FACILITY, MSG_ID_INVALID_FACILITY, processingFacility)), 
+					http.errorHeaders(logger.log(IngestorMessage.INVALID_FACILITY, processingFacility)), 
 					HttpStatus.BAD_REQUEST);
 		}
 		
 		try {
 			return new ResponseEntity<>(productIngestor.modifyProductFile(productId, facility, productFile), HttpStatus.OK);
 		} catch (IllegalArgumentException e) {
-			return new ResponseEntity<>(errorHeaders(e.getMessage()), HttpStatus.BAD_REQUEST);
+			return new ResponseEntity<>(http.errorHeaders(e.getMessage()), HttpStatus.BAD_REQUEST);
 		} catch (EntityNotFoundException e) {
-			return new ResponseEntity<>(errorHeaders(e.getMessage()), HttpStatus.NOT_FOUND);
+			return new ResponseEntity<>(http.errorHeaders(e.getMessage()), HttpStatus.NOT_FOUND);
 		} catch (ConcurrentModificationException e) {
-			return new ResponseEntity<>(errorHeaders(e.getMessage()), HttpStatus.CONFLICT);
+			return new ResponseEntity<>(http.errorHeaders(e.getMessage()), HttpStatus.CONFLICT);
 		} catch (SecurityException e) {
-			return new ResponseEntity<>(errorHeaders(e.getMessage()), HttpStatus.FORBIDDEN);
+			return new ResponseEntity<>(http.errorHeaders(e.getMessage()), HttpStatus.FORBIDDEN);
 		}
 	}
 

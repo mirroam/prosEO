@@ -106,8 +106,8 @@ public class OrbitControllerTest {
 			testMission = RepositoryService.getMissionRepository().save(testMission);			
 		}
 		
-		if (null != RepositoryService.getSpacecraftRepository().findByCode(testData[5]))
-		testSpacecraft = RepositoryService.getSpacecraftRepository().findByCode(testData[5]);
+		if (null != RepositoryService.getSpacecraftRepository().findByMissionAndCode(testData[2], testData[5]))
+		testSpacecraft = RepositoryService.getSpacecraftRepository().findByMissionAndCode(testData[2], testData[5]);
 		else {
 			//adding Spacecraft parameters
 			testSpacecraft.setMission(testMission);
@@ -117,10 +117,10 @@ public class OrbitControllerTest {
 			testSpacecraft = RepositoryService.getSpacecraftRepository().save(testSpacecraft);				
 		}
 
-		if (null != RepositoryService.getOrbitRepository().findBySpacecraftCodeAndOrbitNumber(testData[5], Integer.valueOf(testData[9]))) {
+		if (null != RepositoryService.getOrbitRepository().findByMissionCodeAndSpacecraftCodeAndOrbitNumber(testMission.getCode(), testData[5], Integer.valueOf(testData[9]))) {
 			logger.info("Found test orbit {}", testOrbit.getId());
 
-			return testOrbit = RepositoryService.getOrbitRepository().findBySpacecraftCodeAndOrbitNumber(testData[5], Integer.valueOf(testData[9]));	
+			return testOrbit = RepositoryService.getOrbitRepository().findByMissionCodeAndSpacecraftCodeAndOrbitNumber(testMission.getCode(), testData[5], Integer.valueOf(testData[9]));	
 		}
 			
 		else{

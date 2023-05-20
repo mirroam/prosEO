@@ -5,14 +5,13 @@
  */
 package de.dlr.proseo.ui.cli;
 
-import static de.dlr.proseo.ui.backend.UIMessages.*;
-
 import java.io.IOException;
+import java.net.URLEncoder;
+import java.nio.charset.Charset;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
@@ -21,6 +20,8 @@ import org.springframework.web.client.RestClientResponseException;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import de.dlr.proseo.logging.logger.ProseoLogger;
+import de.dlr.proseo.logging.messages.UIMessage;
 import de.dlr.proseo.model.rest.model.JobState;
 import de.dlr.proseo.model.rest.model.JobStepState;
 import de.dlr.proseo.model.rest.model.RestJob;
@@ -51,6 +52,10 @@ public class JobCommandRunner {
 	private static final String CMD_CANCEL = "cancel";
 	private static final String CMD_RETRY = "retry";
 
+	private static final String OPTION_FORCE = "force";
+	private static final String OPTION_VERBOSE = "verbose";
+	private static final String OPTION_FORMAT = "format";
+	
 	private static final String URI_PATH_ORDERS = "/orders";
 	private static final String URI_PATH_JOBS = "/jobs";
 	private static final String URI_PATH_JOBSTEPS = "/jobsteps";
@@ -81,7 +86,7 @@ public class JobCommandRunner {
 	private ServiceConnection serviceConnection;
 	
 	/** A logger for this class */
-	private static Logger logger = LoggerFactory.getLogger(JobCommandRunner.class);
+	private static ProseoLogger logger = new ProseoLogger(JobCommandRunner.class);
 	
 	/**
 	 * Retrieve a processing order by identifier, which is the first parameter of the given command.
@@ -96,7 +101,7 @@ public class JobCommandRunner {
 		/* Get order ID from command parameters */
 		if (command.getParameters().isEmpty()) {
 			// No identifying value given
-			System.err.println(uiMsg(MSG_ID_NO_IDENTIFIER_GIVEN));
+			System.err.println(ProseoLogger.format(UIMessage.NO_IDENTIFIER_GIVEN));
 			return null;
 		}
 		String orderIdentifier = command.getParameters().get(0).getValue();
@@ -105,7 +110,7 @@ public class JobCommandRunner {
 		try {
 			List<?> resultList = null;
 			resultList = serviceConnection.getFromService(serviceConfig.getOrderManagerUrl(),
-					URI_PATH_ORDERS + "?identifier=" + orderIdentifier,
+					URI_PATH_ORDERS + "?identifier=" + URLEncoder.encode(orderIdentifier, Charset.defaultCharset()),
 					List.class, loginManager.getUser(), loginManager.getPassword());
 			if (resultList.isEmpty()) {
 				throw new HttpClientErrorException(HttpStatus.NOT_FOUND);
@@ -118,19 +123,21 @@ public class JobCommandRunner {
 			String message = null;
 			switch (e.getRawStatusCode()) {
 			case org.apache.http.HttpStatus.SC_NOT_FOUND:
-				message = uiMsg(MSG_ID_ORDER_NOT_FOUND, orderIdentifier);
+				message = ProseoLogger.format(UIMessage.ORDER_NOT_FOUND, orderIdentifier);
 				break;
 			case org.apache.http.HttpStatus.SC_UNAUTHORIZED:
 			case org.apache.http.HttpStatus.SC_FORBIDDEN:
-				message = uiMsg(MSG_ID_NOT_AUTHORIZED, loginManager.getUser(), JOBS, loginManager.getMission());
+				message = (null == e.getStatusText() ?
+						ProseoLogger.format(UIMessage.NOT_AUTHORIZED, loginManager.getUser(), JOBS, loginManager.getMission()) :
+						e.getStatusText());
 				break;
 			default:
-				message = uiMsg(MSG_ID_EXCEPTION, e.getMessage());
+				message = ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage());
 			}
 			System.err.println(message);
 			return null;
 		} catch (RuntimeException e) {
-			System.err.println(uiMsg(MSG_ID_EXCEPTION, e.getMessage()));
+			System.err.println(ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage()));
 			return null;
 		}
 	}
@@ -148,7 +155,7 @@ public class JobCommandRunner {
 		/* Get job ID from command parameters */
 		if (command.getParameters().isEmpty()) {
 			// No identifying value given
-			System.err.println(uiMsg(MSG_ID_NO_JOB_DBID_GIVEN));
+			System.err.println(ProseoLogger.format(UIMessage.NO_JOB_DBID_GIVEN));
 			return null;
 		}
 		String jobId = command.getParameters().get(0).getValue();
@@ -167,19 +174,21 @@ public class JobCommandRunner {
 			String message = null;
 			switch (e.getRawStatusCode()) {
 			case org.apache.http.HttpStatus.SC_NOT_FOUND:
-				message = uiMsg(MSG_ID_JOB_NOT_FOUND, jobId);
+				message = ProseoLogger.format(UIMessage.JOB_NOT_FOUND, jobId);
 				break;
 			case org.apache.http.HttpStatus.SC_UNAUTHORIZED:
 			case org.apache.http.HttpStatus.SC_FORBIDDEN:
-				message = uiMsg(MSG_ID_NOT_AUTHORIZED, loginManager.getUser(), JOBS, loginManager.getMission());
+				message = (null == e.getStatusText() ?
+						ProseoLogger.format(UIMessage.NOT_AUTHORIZED, loginManager.getUser(), JOBS, loginManager.getMission()) :
+						e.getStatusText());
 				break;
 			default:
-				message = uiMsg(MSG_ID_EXCEPTION, e.getMessage());
+				message = ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage());
 			}
 			System.err.println(message);
 			return null;
 		} catch (RuntimeException e) {
-			System.err.println(uiMsg(MSG_ID_EXCEPTION, e.getMessage()));
+			System.err.println(ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage()));
 			return null;
 		}
 	}
@@ -197,7 +206,7 @@ public class JobCommandRunner {
 		/* Get job step ID from command parameters */
 		if (command.getParameters().isEmpty()) {
 			// No identifying value given
-			System.err.println(uiMsg(MSG_ID_NO_JOBSTEP_DBID_GIVEN));
+			System.err.println(ProseoLogger.format(UIMessage.NO_JOBSTEP_DBID_GIVEN));
 			return null;
 		}
 		String jobStepId = command.getParameters().get(0).getValue();
@@ -216,19 +225,21 @@ public class JobCommandRunner {
 			String message = null;
 			switch (e.getRawStatusCode()) {
 			case org.apache.http.HttpStatus.SC_NOT_FOUND:
-				message = uiMsg(MSG_ID_JOBSTEP_NOT_FOUND, jobStepId);
+				message = ProseoLogger.format(UIMessage.JOBSTEP_NOT_FOUND, jobStepId);
 				break;
 			case org.apache.http.HttpStatus.SC_UNAUTHORIZED:
 			case org.apache.http.HttpStatus.SC_FORBIDDEN:
-				message = uiMsg(MSG_ID_NOT_AUTHORIZED, loginManager.getUser(), JOBSTEPS, loginManager.getMission());
+				message = (null == e.getStatusText() ?
+						ProseoLogger.format(UIMessage.NOT_AUTHORIZED, loginManager.getUser(), JOBSTEPS, loginManager.getMission()) :
+						e.getStatusText());
 				break;
 			default:
-				message = uiMsg(MSG_ID_EXCEPTION, e.getMessage());
+				message = ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage());
 			}
 			System.err.println(message);
 			return null;
 		} catch (RuntimeException e) {
-			System.err.println(uiMsg(MSG_ID_EXCEPTION, e.getMessage()));
+			System.err.println(ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage()));
 			return null;
 		}
 	}
@@ -246,10 +257,10 @@ public class JobCommandRunner {
 		boolean isVerbose = false;
 		for (ParsedOption option: showCommand.getOptions()) {
 			switch(option.getName()) {
-			case "format":
+			case OPTION_FORMAT:
 				jobOutputFormat = option.getValue().toUpperCase();
 				break;
-			case "verbose":
+			case OPTION_VERBOSE:
 				isVerbose = true;
 				break;
 			}
@@ -267,7 +278,7 @@ public class JobCommandRunner {
 			try {
 				requestedJobState = JobState.valueOf(showCommand.getParameters().get(1).getValue().toUpperCase());
 			} catch (Exception e) {
-				System.err.println(uiMsg(MSG_ID_INVALID_JOB_STATE_VALUE, showCommand.getParameters().get(1).getValue()));
+				System.err.println(ProseoLogger.format(UIMessage.INVALID_JOB_STATE_VALUE, showCommand.getParameters().get(1).getValue()));
 				return;
 			}
 		}
@@ -286,19 +297,21 @@ public class JobCommandRunner {
 			String message = null;
 			switch (e.getRawStatusCode()) {
 			case org.apache.http.HttpStatus.SC_NOT_FOUND:
-				message = uiMsg(MSG_ID_NO_JOBS_FOUND);
+				message = ProseoLogger.format(UIMessage.NO_JOBS_FOUND);
 				break;
 			case org.apache.http.HttpStatus.SC_UNAUTHORIZED:
 			case org.apache.http.HttpStatus.SC_FORBIDDEN:
-				message = uiMsg(MSG_ID_NOT_AUTHORIZED, loginManager.getUser(), JOBS, loginManager.getMission());
+				message = (null == e.getStatusText() ?
+						ProseoLogger.format(UIMessage.NOT_AUTHORIZED, loginManager.getUser(), JOBS, loginManager.getMission()) :
+						e.getStatusText());
 				break;
 			default:
-				message = uiMsg(MSG_ID_EXCEPTION, e.getMessage());
+				message = ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage());
 			}
 			System.err.println(message);
 			return;
 		} catch (RuntimeException e) {
-			System.err.println(uiMsg(MSG_ID_EXCEPTION, e.getMessage()));
+			System.err.println(ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage()));
 			return;
 		}
 		
@@ -311,14 +324,16 @@ public class JobCommandRunner {
 				System.err.println(e.getMessage());
 				return;
 			} catch (IOException e) {
-				System.err.println(uiMsg(MSG_ID_EXCEPTION, e.getMessage()));
+				System.err.println(ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage()));
 				return;
 			}
 		} else {
+			String listFormat = "%11s %-25s %-25s %-10s %s";
+			System.out.println(String.format(listFormat, "Database ID", "Sensing Start", "Sensing Stop", "Job State", ""));
 			for (Object listObject: resultList) {
 				if (listObject instanceof Map) {
 					Map<?, ?> jobMap = (Map<?, ?>) listObject;
-					System.out.println(String.format("%16s %-25s %-25s %s %s",
+					System.out.println(String.format(listFormat,
 						jobMap.get("id").toString(),
 						jobMap.get("startTime"),
 						jobMap.get("stopTime"),
@@ -341,7 +356,7 @@ public class JobCommandRunner {
 		boolean isForcing = false;
 		for (ParsedOption option: suspendCommand.getOptions()) {
 			switch(option.getName()) {
-			case "force":
+			case OPTION_FORCE:
 				isForcing = true;
 				break;
 			}
@@ -356,7 +371,7 @@ public class JobCommandRunner {
 		/* Check whether (database) job is in state "RELEASED" or "STARTED", otherwise suspending not allowed */
 		if (!JobState.RELEASED.equals(restJob.getJobState())
 				&& !JobState.STARTED.equals(restJob.getJobState())) {
-			System.err.println(uiMsg(MSG_ID_INVALID_JOB_STATE,
+			System.err.println(ProseoLogger.format(UIMessage.INVALID_JOB_STATE,
 					CMD_SUSPEND, restJob.getJobState(), JobState.RELEASED.toString() + " or " + JobState.STARTED.toString()));
 			return;
 		}
@@ -372,28 +387,29 @@ public class JobCommandRunner {
 			String message = null;
 			switch (e.getRawStatusCode()) {
 			case org.apache.http.HttpStatus.SC_NOT_FOUND:
-				message = uiMsg(MSG_ID_JOB_NOT_FOUND, restJob.getId());
+				message = ProseoLogger.format(UIMessage.JOB_NOT_FOUND, restJob.getId());
 				break;
 			case org.apache.http.HttpStatus.SC_BAD_REQUEST:
-				message = uiMsg(MSG_ID_JOB_DATA_INVALID,  e.getMessage());
+				message = ProseoLogger.format(UIMessage.JOB_DATA_INVALID,  e.getStatusText());
 				break;
 			case org.apache.http.HttpStatus.SC_UNAUTHORIZED:
 			case org.apache.http.HttpStatus.SC_FORBIDDEN:
-				message = uiMsg(MSG_ID_NOT_AUTHORIZED, loginManager.getUser(), JOBS, loginManager.getMission());
+				message = (null == e.getStatusText() ?
+						ProseoLogger.format(UIMessage.NOT_AUTHORIZED, loginManager.getUser(), JOBS, loginManager.getMission()) :
+						e.getStatusText());
 				break;
 			default:
-				message = uiMsg(MSG_ID_EXCEPTION, e.getMessage());
+				message = ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage());
 			}
 			System.err.println(message);
 			return;
 		} catch (RuntimeException e) {
-			System.err.println(uiMsg(MSG_ID_EXCEPTION, e.getMessage()));
+			System.err.println(ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage()));
 			return;
 		}
 		
 		/* Report success, giving new job version */
-		String message = uiMsg(MSG_ID_JOB_SUSPENDED, restJob.getId(), restJob.getVersion());
-		logger.info(message);
+		String message = logger.log(UIMessage.JOB_SUSPENDED, restJob.getId(), restJob.getVersion());
 		System.out.println(message);
 	}
 	
@@ -412,9 +428,9 @@ public class JobCommandRunner {
 		}
 		
 		/* Check whether (database) job is in state "INITIAL", otherwise resuming not allowed */
-		if (!JobState.INITIAL.equals(restJob.getJobState())) {
-			System.err.println(uiMsg(MSG_ID_INVALID_JOB_STATE,
-					CMD_RESUME, restJob.getJobState(), JobState.INITIAL.toString()));
+		if (!JobState.PLANNED.equals(restJob.getJobState())) {
+			System.err.println(ProseoLogger.format(UIMessage.INVALID_JOB_STATE,
+					CMD_RESUME, restJob.getJobState(), JobState.PLANNED.toString()));
 			return;
 		}
 		
@@ -427,28 +443,29 @@ public class JobCommandRunner {
 			String message = null;
 			switch (e.getRawStatusCode()) {
 			case org.apache.http.HttpStatus.SC_NOT_FOUND:
-				message = uiMsg(MSG_ID_JOB_NOT_FOUND, restJob.getId());
+				message = ProseoLogger.format(UIMessage.JOB_NOT_FOUND, restJob.getId());
 				break;
 			case org.apache.http.HttpStatus.SC_BAD_REQUEST:
-				message = uiMsg(MSG_ID_JOB_DATA_INVALID,  e.getMessage());
+				message = ProseoLogger.format(UIMessage.JOB_DATA_INVALID,  e.getStatusText());
 				break;
 			case org.apache.http.HttpStatus.SC_UNAUTHORIZED:
 			case org.apache.http.HttpStatus.SC_FORBIDDEN:
-				message = uiMsg(MSG_ID_NOT_AUTHORIZED, loginManager.getUser(), JOBS, loginManager.getMission());
+				message = (null == e.getStatusText() ?
+						ProseoLogger.format(UIMessage.NOT_AUTHORIZED, loginManager.getUser(), JOBS, loginManager.getMission()) :
+						e.getStatusText());
 				break;
 			default:
-				message = uiMsg(MSG_ID_EXCEPTION, e.getMessage());
+				message = ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage());
 			}
 			System.err.println(message);
 			return;
 		} catch (RuntimeException e) {
-			System.err.println(uiMsg(MSG_ID_EXCEPTION, e.getMessage()));
+			System.err.println(ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage()));
 			return;
 		}
 		
 		/* Report success, giving new job version */
-		String message = uiMsg(MSG_ID_JOB_RESUMED, restJob.getId(), restJob.getVersion());
-		logger.info(message);
+		String message = logger.log(UIMessage.JOB_RESUMED, restJob.getId(), restJob.getVersion());
 		System.out.println(message);
 	}
 	
@@ -467,9 +484,9 @@ public class JobCommandRunner {
 		}
 		
 		/* Check whether (database) job is in state "INITIAL", otherwise cancelling not allowed */
-		if (!JobState.INITIAL.equals(restJob.getJobState())) {
-			System.err.println(uiMsg(MSG_ID_INVALID_JOB_STATE,
-					CMD_CANCEL, restJob.getJobState(), JobState.INITIAL.toString()));
+		if (!JobState.PLANNED.equals(restJob.getJobState())) {
+			System.err.println(ProseoLogger.format(UIMessage.INVALID_JOB_STATE,
+					CMD_CANCEL, restJob.getJobState(), JobState.PLANNED.toString()));
 			return;
 		}
 		
@@ -482,28 +499,29 @@ public class JobCommandRunner {
 			String message = null;
 			switch (e.getRawStatusCode()) {
 			case org.apache.http.HttpStatus.SC_NOT_FOUND:
-				message = uiMsg(MSG_ID_JOB_NOT_FOUND, restJob.getId());
+				message = ProseoLogger.format(UIMessage.JOB_NOT_FOUND, restJob.getId());
 				break;
 			case org.apache.http.HttpStatus.SC_BAD_REQUEST:
-				message = uiMsg(MSG_ID_JOB_DATA_INVALID,  e.getMessage());
+				message = ProseoLogger.format(UIMessage.JOB_DATA_INVALID,  e.getStatusText());
 				break;
 			case org.apache.http.HttpStatus.SC_UNAUTHORIZED:
 			case org.apache.http.HttpStatus.SC_FORBIDDEN:
-				message = uiMsg(MSG_ID_NOT_AUTHORIZED, loginManager.getUser(), JOBS, loginManager.getMission());
+				message = (null == e.getStatusText() ?
+						ProseoLogger.format(UIMessage.NOT_AUTHORIZED, loginManager.getUser(), JOBS, loginManager.getMission()) :
+						e.getStatusText());
 				break;
 			default:
-				message = uiMsg(MSG_ID_EXCEPTION, e.getMessage());
+				message = ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage());
 			}
 			System.err.println(message);
 			return;
 		} catch (RuntimeException e) {
-			System.err.println(uiMsg(MSG_ID_EXCEPTION, e.getMessage()));
+			System.err.println(ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage()));
 			return;
 		}
 		
 		/* Report success, giving new job version */
-		String message = uiMsg(MSG_ID_JOB_CANCELLED, restJob.getId(), restJob.getVersion());
-		logger.info(message);
+		String message = logger.log(UIMessage.JOB_CANCELLED, restJob.getId(), restJob.getVersion());
 		System.out.println(message);
 	}
 	
@@ -523,7 +541,7 @@ public class JobCommandRunner {
 		
 		/* Check whether (database) job is in state "FAILED", otherwise retrying not allowed */
 		if (!JobState.FAILED.equals(restJob.getJobState())) {
-			System.err.println(uiMsg(MSG_ID_INVALID_JOB_STATE,
+			System.err.println(ProseoLogger.format(UIMessage.INVALID_JOB_STATE,
 					CMD_RETRY, restJob.getJobState(), JobState.FAILED.toString()));
 			return;
 		}
@@ -537,28 +555,29 @@ public class JobCommandRunner {
 			String message = null;
 			switch (e.getRawStatusCode()) {
 			case org.apache.http.HttpStatus.SC_NOT_FOUND:
-				message = uiMsg(MSG_ID_JOB_NOT_FOUND, restJob.getId());
+				message = ProseoLogger.format(UIMessage.JOB_NOT_FOUND, restJob.getId());
 				break;
 			case org.apache.http.HttpStatus.SC_BAD_REQUEST:
-				message = uiMsg(MSG_ID_JOB_DATA_INVALID,  e.getMessage());
+				message = ProseoLogger.format(UIMessage.JOB_DATA_INVALID,  e.getStatusText());
 				break;
 			case org.apache.http.HttpStatus.SC_UNAUTHORIZED:
 			case org.apache.http.HttpStatus.SC_FORBIDDEN:
-				message = uiMsg(MSG_ID_NOT_AUTHORIZED, loginManager.getUser(), JOBS, loginManager.getMission());
+				message = (null == e.getStatusText() ?
+						ProseoLogger.format(UIMessage.NOT_AUTHORIZED, loginManager.getUser(), JOBS, loginManager.getMission()) :
+						e.getStatusText());
 				break;
 			default:
-				message = uiMsg(MSG_ID_EXCEPTION, e.getMessage());
+				message = ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage());
 			}
 			System.err.println(message);
 			return;
 		} catch (RuntimeException e) {
-			System.err.println(uiMsg(MSG_ID_EXCEPTION, e.getMessage()));
+			System.err.println(ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage()));
 			return;
 		}
 		
 		/* Report success, giving new job version */
-		String message = uiMsg(MSG_ID_RETRYING_JOB, restJob.getId(), restJob.getVersion());
-		logger.info(message);
+		String message = logger.log(UIMessage.RETRYING_JOB, restJob.getId(), restJob.getVersion());
 		System.out.println(message);
 	}
 	
@@ -575,10 +594,10 @@ public class JobCommandRunner {
 		boolean isVerbose = false;
 		for (ParsedOption option: showCommand.getOptions()) {
 			switch(option.getName()) {
-			case "format":
+			case OPTION_FORMAT:
 				jobStepOutputFormat = option.getValue().toUpperCase();
 				break;
-			case "verbose":
+			case OPTION_VERBOSE:
 				isVerbose = true;
 				break;
 			}
@@ -596,28 +615,38 @@ public class JobCommandRunner {
 			try {
 				requestedJobStepState = JobStepState.valueOf(showCommand.getParameters().get(1).getValue().toUpperCase());
 			} catch (Exception e) {
-				System.err.println(uiMsg(MSG_ID_INVALID_JOBSTEP_STATE_VALUE, showCommand.getParameters().get(1).getValue()));
+				System.err.println(ProseoLogger.format(UIMessage.INVALID_JOBSTEP_STATE_VALUE, showCommand.getParameters().get(1).getValue()));
 				return;
 			}
 		}
 		
-		/* Display the job step(s) found */
+		/* Filter job steps */
+		List<RestJobStep> filteredJobSteps = new ArrayList<>();
 		for (RestJobStep restJobStep: restJob.getJobSteps()) {
 			if (null == requestedJobStepState || requestedJobStepState.equals(restJobStep.getJobStepState())) {
-				if (isVerbose) {
-					try {
-						CLIUtil.printObject(System.out, restJobStep, jobStepOutputFormat);
-					} catch (IllegalArgumentException e) {
-						System.err.println(e.getMessage());
-						return;
-					} catch (IOException e) {
-						System.err.println(uiMsg(MSG_ID_EXCEPTION, e.getMessage()));
-						return;
-					} 
-				} else {
-					System.out.println(String.format("%16s %-12s %s", restJobStep.getId(), restJobStep.getOutputProductClass(),
-							restJobStep.getJobStepState().toString()));
-				}
+				filteredJobSteps.add(restJobStep);
+			}
+		}
+		
+		/* Display the job step(s) found */
+		if (filteredJobSteps.isEmpty()) {
+			System.err.println(ProseoLogger.format(UIMessage.NO_JOBSTEPS_FOUND));
+		} else if (isVerbose) {
+			try {
+				CLIUtil.printObject(System.out, filteredJobSteps, jobStepOutputFormat);
+			} catch (IllegalArgumentException e) {
+				System.err.println(e.getMessage());
+				return;
+			} catch (IOException e) {
+				System.err.println(ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage()));
+				return;
+			} 
+		} else {
+			String listFormat = "%11s %12s %s";
+			System.out.println(String.format(listFormat, "Database ID", "Output Class", "Job Step State"));
+			for (RestJobStep restJobStep: filteredJobSteps) {
+				System.out.println(String.format(listFormat, restJobStep.getId(), restJobStep.getOutputProductClass(),
+						restJobStep.getJobStepState().toString()));
 			}
 		}
 	}
@@ -634,7 +663,7 @@ public class JobCommandRunner {
 		boolean isForcing = false;
 		for (ParsedOption option: suspendCommand.getOptions()) {
 			switch(option.getName()) {
-			case "force":
+			case OPTION_FORCE:
 				isForcing = true;
 				break;
 			}
@@ -650,9 +679,10 @@ public class JobCommandRunner {
 		if (!JobStepState.READY.equals(restJobStep.getJobStepState())
 				&& !JobStepState.WAITING_INPUT.equals(restJobStep.getJobStepState())
 				&& !JobStepState.RUNNING.equals(restJobStep.getJobStepState())) {
-			System.err.println(uiMsg(MSG_ID_INVALID_JOBSTEP_STATE,
+			System.err.println(ProseoLogger.format(UIMessage.INVALID_JOBSTEP_STATE,
 					CMD_SUSPEND, restJobStep.getJobStepState(),
-					JobStepState.READY.toString() + " or " + JobStepState.RUNNING.toString()));
+					JobStepState.READY.toString() + ", " + JobStepState.WAITING_INPUT.toString() + " or " + 
+					JobStepState.RUNNING.toString()));
 			return;
 		}
 		
@@ -666,28 +696,29 @@ public class JobCommandRunner {
 			String message = null;
 			switch (e.getRawStatusCode()) {
 			case org.apache.http.HttpStatus.SC_NOT_FOUND:
-				message = uiMsg(MSG_ID_JOBSTEP_NOT_FOUND, restJobStep.getId());
+				message = ProseoLogger.format(UIMessage.JOBSTEP_NOT_FOUND, restJobStep.getId());
 				break;
 			case org.apache.http.HttpStatus.SC_BAD_REQUEST:
-				message = uiMsg(MSG_ID_JOBSTEP_DATA_INVALID,  e.getMessage());
+				message = ProseoLogger.format(UIMessage.JOBSTEP_DATA_INVALID,  e.getStatusText());
 				break;
 			case org.apache.http.HttpStatus.SC_UNAUTHORIZED:
 			case org.apache.http.HttpStatus.SC_FORBIDDEN:
-				message = uiMsg(MSG_ID_NOT_AUTHORIZED, loginManager.getUser(), JOBSTEPS, loginManager.getMission());
+				message = (null == e.getStatusText() ?
+						ProseoLogger.format(UIMessage.NOT_AUTHORIZED, loginManager.getUser(), JOBSTEPS, loginManager.getMission()) :
+						e.getStatusText());
 				break;
 			default:
-				message = uiMsg(MSG_ID_EXCEPTION, e.getMessage());
+				message = ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage());
 			}
 			System.err.println(message);
 			return;
 		} catch (RuntimeException e) {
-			System.err.println(uiMsg(MSG_ID_EXCEPTION, e.getMessage()));
+			System.err.println(ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage()));
 			return;
 		}
 		
 		/* Report success, giving new job step version */
-		String message = uiMsg(MSG_ID_JOBSTEP_SUSPENDED, restJobStep.getId(), restJobStep.getVersion());
-		logger.info(message);
+		String message = logger.log(UIMessage.JOBSTEP_SUSPENDED, restJobStep.getId(), restJobStep.getVersion());
 		System.out.println(message);
 	}
 	
@@ -706,9 +737,9 @@ public class JobCommandRunner {
 		}
 		
 		/* Check whether (database) job step is in state "READY", otherwise resuming not allowed */
-		if (!JobStepState.INITIAL.equals(restJobStep.getJobStepState())) {
-			System.err.println(uiMsg(MSG_ID_INVALID_JOBSTEP_STATE,
-					CMD_RESUME, restJobStep.getJobStepState(), JobStepState.INITIAL.toString()));
+		if (!JobStepState.PLANNED.equals(restJobStep.getJobStepState())) {
+			System.err.println(ProseoLogger.format(UIMessage.INVALID_JOBSTEP_STATE,
+					CMD_RESUME, restJobStep.getJobStepState(), JobStepState.PLANNED.toString()));
 			return;
 		}
 		
@@ -721,28 +752,29 @@ public class JobCommandRunner {
 			String message = null;
 			switch (e.getRawStatusCode()) {
 			case org.apache.http.HttpStatus.SC_NOT_FOUND:
-				message = uiMsg(MSG_ID_JOBSTEP_NOT_FOUND, restJobStep.getId());
+				message = ProseoLogger.format(UIMessage.JOBSTEP_NOT_FOUND, restJobStep.getId());
 				break;
 			case org.apache.http.HttpStatus.SC_BAD_REQUEST:
-				message = uiMsg(MSG_ID_JOBSTEP_DATA_INVALID,  e.getMessage());
+				message = ProseoLogger.format(UIMessage.JOBSTEP_DATA_INVALID,  e.getStatusText());
 				break;
 			case org.apache.http.HttpStatus.SC_UNAUTHORIZED:
 			case org.apache.http.HttpStatus.SC_FORBIDDEN:
-				message = uiMsg(MSG_ID_NOT_AUTHORIZED, loginManager.getUser(), JOBSTEPS, loginManager.getMission());
+				message = (null == e.getStatusText() ?
+						ProseoLogger.format(UIMessage.NOT_AUTHORIZED, loginManager.getUser(), JOBSTEPS, loginManager.getMission()) :
+						e.getStatusText());
 				break;
 			default:
-				message = uiMsg(MSG_ID_EXCEPTION, e.getMessage());
+				message = ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage());
 			}
 			System.err.println(message);
 			return;
 		} catch (RuntimeException e) {
-			System.err.println(uiMsg(MSG_ID_EXCEPTION, e.getMessage()));
+			System.err.println(ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage()));
 			return;
 		}
 		
 		/* Report success, giving new job step version */
-		String message = uiMsg(MSG_ID_JOBSTEP_RESUMED, restJobStep.getId(), restJobStep.getVersion());
-		logger.info(message);
+		String message = logger.log(UIMessage.JOBSTEP_RESUMED, restJobStep.getId(), restJobStep.getVersion());
 		System.out.println(message);
 	}
 	
@@ -760,11 +792,12 @@ public class JobCommandRunner {
 			return;
 		}
 		
-		/* Check whether (database) job is in state "INITIAL" or "RUNNING", otherwise cancelling not allowed */
-		if (!JobStepState.INITIAL.equals(restJobStep.getJobStepState())
+		/* Check whether (database) job is in state "PLANNED" or "RUNNING", otherwise cancelling not allowed */
+		if (!JobStepState.PLANNED.equals(restJobStep.getJobStepState())
 				&&!JobStepState.RUNNING.equals(restJobStep.getJobStepState())) {
-			System.err.println(uiMsg(MSG_ID_INVALID_JOBSTEP_STATE,
-					CMD_CANCEL, restJobStep.getJobStepState(), JobStepState.INITIAL.toString()));
+			System.err.println(ProseoLogger.format(UIMessage.INVALID_JOBSTEP_STATE,
+					CMD_CANCEL, restJobStep.getJobStepState(), 
+					JobStepState.PLANNED.toString() + " or " + JobStepState.RUNNING.toString()));
 			return;
 		}
 		
@@ -777,28 +810,29 @@ public class JobCommandRunner {
 			String message = null;
 			switch (e.getRawStatusCode()) {
 			case org.apache.http.HttpStatus.SC_NOT_FOUND:
-				message = uiMsg(MSG_ID_JOBSTEP_NOT_FOUND, restJobStep.getId());
+				message = ProseoLogger.format(UIMessage.JOBSTEP_NOT_FOUND, restJobStep.getId());
 				break;
 			case org.apache.http.HttpStatus.SC_BAD_REQUEST:
-				message = uiMsg(MSG_ID_JOBSTEP_DATA_INVALID,  e.getMessage());
+				message = ProseoLogger.format(UIMessage.JOBSTEP_DATA_INVALID,  e.getStatusText());
 				break;
 			case org.apache.http.HttpStatus.SC_UNAUTHORIZED:
 			case org.apache.http.HttpStatus.SC_FORBIDDEN:
-				message = uiMsg(MSG_ID_NOT_AUTHORIZED, loginManager.getUser(), JOBSTEPS, loginManager.getMission());
+				message = (null == e.getStatusText() ?
+						ProseoLogger.format(UIMessage.NOT_AUTHORIZED, loginManager.getUser(), JOBSTEPS, loginManager.getMission()) :
+						e.getStatusText());
 				break;
 			default:
-				message = uiMsg(MSG_ID_EXCEPTION, e.getMessage());
+				message = ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage());
 			}
 			System.err.println(message);
 			return;
 		} catch (RuntimeException e) {
-			System.err.println(uiMsg(MSG_ID_EXCEPTION, e.getMessage()));
+			System.err.println(ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage()));
 			return;
 		}
 		
 		/* Report success, giving new job step version */
-		String message = uiMsg(MSG_ID_JOBSTEP_CANCELLED, restJobStep.getId(), restJobStep.getVersion());
-		logger.info(message);
+		String message = logger.log(UIMessage.JOBSTEP_CANCELLED, restJobStep.getId(), restJobStep.getVersion());
 		System.out.println(message);
 	}
 	
@@ -818,7 +852,7 @@ public class JobCommandRunner {
 		
 		/* Check whether (database) job step is in state "FAILED", otherwise retrying not allowed */
 		if (!JobStepState.FAILED.equals(restJobStep.getJobStepState())) {
-			System.err.println(uiMsg(MSG_ID_INVALID_JOBSTEP_STATE,
+			System.err.println(ProseoLogger.format(UIMessage.INVALID_JOBSTEP_STATE,
 					CMD_RETRY, restJobStep.getJobStepState(), JobState.FAILED.toString()));
 			return;
 		}
@@ -832,28 +866,29 @@ public class JobCommandRunner {
 			String message = null;
 			switch (e.getRawStatusCode()) {
 			case org.apache.http.HttpStatus.SC_NOT_FOUND:
-				message = uiMsg(MSG_ID_JOBSTEP_NOT_FOUND, restJobStep.getId());
+				message = ProseoLogger.format(UIMessage.JOBSTEP_NOT_FOUND, restJobStep.getId());
 				break;
 			case org.apache.http.HttpStatus.SC_BAD_REQUEST:
-				message = uiMsg(MSG_ID_JOBSTEP_DATA_INVALID,  e.getMessage());
+				message = ProseoLogger.format(UIMessage.JOBSTEP_DATA_INVALID,  e.getStatusText());
 				break;
 			case org.apache.http.HttpStatus.SC_UNAUTHORIZED:
 			case org.apache.http.HttpStatus.SC_FORBIDDEN:
-				message = uiMsg(MSG_ID_NOT_AUTHORIZED, loginManager.getUser(), JOBSTEPS, loginManager.getMission());
+				message = (null == e.getStatusText() ?
+						ProseoLogger.format(UIMessage.NOT_AUTHORIZED, loginManager.getUser(), JOBSTEPS, loginManager.getMission()) :
+						e.getStatusText());
 				break;
 			default:
-				message = uiMsg(MSG_ID_EXCEPTION, e.getMessage());
+				message = ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage());
 			}
 			System.err.println(message);
 			return;
 		} catch (RuntimeException e) {
-			System.err.println(uiMsg(MSG_ID_EXCEPTION, e.getMessage()));
+			System.err.println(ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage()));
 			return;
 		}
 		
 		/* Report success, giving new job step version */
-		String message = uiMsg(MSG_ID_RETRYING_JOBSTEP, restJobStep.getId(), restJobStep.getVersion());
-		logger.info(message);
+		String message = logger.log(UIMessage.RETRYING_JOBSTEP, restJobStep.getId(), restJobStep.getVersion());
 		System.out.println(message);
 	}
 	
@@ -867,23 +902,23 @@ public class JobCommandRunner {
 		
 		/* Check that user is logged in */
 		if (null == loginManager.getUser()) {
-			System.err.println(uiMsg(MSG_ID_USER_NOT_LOGGED_IN, command.getName()));
+			System.err.println(ProseoLogger.format(UIMessage.USER_NOT_LOGGED_IN, command.getName()));
 			return;
 		}
 		if (null == loginManager.getMission()) {
-			System.err.println(uiMsg(MSG_ID_USER_NOT_LOGGED_IN_TO_MISSION, command.getName()));
+			System.err.println(ProseoLogger.format(UIMessage.USER_NOT_LOGGED_IN_TO_MISSION, command.getName()));
 			return;
 		}
 		
 		/* Check argument */
 		if (!CMD_JOB.equals(command.getName())) {
-			System.err.println(uiMsg(MSG_ID_INVALID_COMMAND_NAME, command.getName()));
+			System.err.println(ProseoLogger.format(UIMessage.INVALID_COMMAND_NAME, command.getName()));
 			return;
 		}
 		
 		/* Make sure a subcommand is given */
 		if (null == command.getSubcommand() || null == command.getSubcommand().getName()) {
-			System.err.println(uiMsg(MSG_ID_SUBCOMMAND_MISSING, command.getName()));
+			System.err.println(ProseoLogger.format(UIMessage.SUBCOMMAND_MISSING, command.getName()));
 			return;
 		}
 		
@@ -897,7 +932,7 @@ public class JobCommandRunner {
 		/* Make sure a sub-subcommand is given for "step" */
 		ParsedCommand subsubcommand = subcommand.getSubcommand();
 		if (CMD_STEP.equals(subcommand.getName()) && null == subcommand.getSubcommand()) {
-			System.err.println(uiMsg(MSG_ID_SUBCOMMAND_MISSING, subcommand.getName()));
+			System.err.println(ProseoLogger.format(UIMessage.SUBCOMMAND_MISSING, subcommand.getName()));
 			return;
 		}
 
@@ -923,13 +958,13 @@ public class JobCommandRunner {
 			case CMD_CANCEL:	cancelJobStep(subsubcommand); break;
 			case CMD_RETRY:		retryJobStep(subsubcommand); break;
 			default:
-				System.err.println(uiMsg(MSG_ID_NOT_IMPLEMENTED, 
+				System.err.println(ProseoLogger.format(UIMessage.COMMAND_NOT_IMPLEMENTED, 
 						command.getName() + " " + subcommand.getName() + " " + subsubcommand.getName()));
 				return;
 			}
 			break;
 		default:
-			System.err.println(uiMsg(MSG_ID_NOT_IMPLEMENTED, command.getName() + " " + subcommand.getName()));
+			System.err.println(ProseoLogger.format(UIMessage.COMMAND_NOT_IMPLEMENTED, command.getName() + " " + subcommand.getName()));
 			return;
 		}
 	}

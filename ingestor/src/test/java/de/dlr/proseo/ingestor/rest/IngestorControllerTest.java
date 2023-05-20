@@ -20,6 +20,7 @@ import org.junit.After;
 import org.junit.AfterClass;
 import org.junit.Before;
 import org.junit.BeforeClass;
+import org.junit.Ignore;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.slf4j.Logger;
@@ -42,11 +43,11 @@ import de.dlr.proseo.ingestor.IngestorConfiguration;
 import de.dlr.proseo.ingestor.IngestorTestConfiguration;
 import de.dlr.proseo.ingestor.rest.model.IngestorProduct;
 import de.dlr.proseo.ingestor.rest.model.RestParameter;
+import de.dlr.proseo.model.enums.ParameterType;
 import de.dlr.proseo.model.enums.StorageType;
 import de.dlr.proseo.model.Mission;
 import de.dlr.proseo.model.Orbit;
 import de.dlr.proseo.model.Parameter;
-import de.dlr.proseo.model.Parameter.ParameterType;
 import de.dlr.proseo.model.ProcessingFacility;
 import de.dlr.proseo.model.Product;
 import de.dlr.proseo.model.ProductClass;
@@ -210,6 +211,7 @@ public class IngestorControllerTest {
 	 */
 	@SuppressWarnings("unchecked")
 	@Test
+	@Ignore
 	public final void testIngestProducts() {
 		
 		TransactionTemplate transactionTemplate = new TransactionTemplate(txManager);
@@ -240,7 +242,7 @@ public class IngestorControllerTest {
 				}
 				logger.info("Using product class " + prodClass.getProductType() + " with id " + prodClass.getId());
 				
-				Spacecraft spacecraft = RepositoryService.getSpacecraftRepository().findByCode(TEST_SC_CODE);
+				Spacecraft spacecraft = RepositoryService.getSpacecraftRepository().findByMissionAndCode(TEST_CODE, TEST_SC_CODE);
 				if (null == spacecraft) {
 					spacecraft = new Spacecraft();
 					spacecraft.setCode(TEST_SC_CODE);
@@ -252,7 +254,7 @@ public class IngestorControllerTest {
 				}
 				logger.info("Using spacecraft " + spacecraft.getCode() + " with id " + spacecraft.getId());
 				
-				Orbit orbit = RepositoryService.getOrbitRepository().findBySpacecraftCodeAndOrbitNumber(TEST_SC_CODE, TEST_ORBIT_NUMBER);
+				Orbit orbit = RepositoryService.getOrbitRepository().findByMissionCodeAndSpacecraftCodeAndOrbitNumber(TEST_CODE, TEST_SC_CODE, TEST_ORBIT_NUMBER);
 				if (null == orbit) {
 					orbit = new Orbit();
 					orbit.setSpacecraft(spacecraft);

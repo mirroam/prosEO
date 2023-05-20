@@ -55,6 +55,12 @@ public class Task extends PersistentObject {
 	private Integer numberOfCpus;
 	
 	/**
+	 * Minimum memory (RAM) requirement for this task in GiB (used by the Production Planner to request memory resources
+	 * on a Kubernetes worker node when scheduling a task; if not set, no specific request will be made)
+	 */
+	private Integer minMemory;
+	
+	/**
 	 * Intermediate output files for testing/evaluation purposes 
 	 * (level 5 "List_of_Breakpoints" from Generic IPF Interface Specifications, sec. 4.1.3)
 	 */
@@ -179,6 +185,24 @@ public class Task extends PersistentObject {
 	}
 
 	/**
+	 * Gets the minimum required memory in GiB
+	 * 
+	 * @return the minimum memory
+	 */
+	public Integer getMinMemory() {
+		return minMemory;
+	}
+
+	/**
+	 * Sets the minimum required memory in GiB
+	 * 
+	 * @param minMemory the minimum memory to set
+	 */
+	public void setMinMemory(Integer minMemory) {
+		this.minMemory = minMemory;
+	}
+
+	/**
 	 * Gets the breakpoint file names
 	 * 
 	 * @return the breakpointFileNames
@@ -206,15 +230,20 @@ public class Task extends PersistentObject {
 
 	@Override
 	public boolean equals(Object obj) {
+		// Object identity
 		if (this == obj)
 			return true;
-		if (!super.equals(obj))
-			return false;
+		
+		// Same database object
+		if (super.equals(obj))
+			return true;
+		
 		if (!(obj instanceof Task))
 			return false;
 		Task other = (Task) obj;
-		return Objects.equals(processor, other.processor) && Objects.equals(taskName, other.taskName)
-				&& Objects.equals(taskVersion, other.taskVersion);
+		return Objects.equals(taskName, other.getTaskName())
+				&& Objects.equals(taskVersion, other.getTaskVersion())
+				&& Objects.equals(processor, other.getProcessor());
 	}
 
 	@Override

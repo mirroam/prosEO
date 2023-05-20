@@ -1,1 +1,0 @@
-FROM dpage/pgadmin4:2019-11-12-2

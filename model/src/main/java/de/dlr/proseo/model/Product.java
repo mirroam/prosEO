@@ -6,6 +6,7 @@
 package de.dlr.proseo.model;
 
 import java.time.Instant;
+import java.time.temporal.TemporalAccessor;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -22,6 +23,7 @@ import javax.persistence.ElementCollection;
 import javax.persistence.Entity;
 import javax.persistence.EnumType;
 import javax.persistence.Enumerated;
+import javax.persistence.FetchType;
 import javax.persistence.Index;
 import javax.persistence.ManyToMany;
 import javax.persistence.ManyToOne;
@@ -29,14 +31,13 @@ import javax.persistence.OneToMany;
 import javax.persistence.OneToOne;
 import javax.persistence.Table;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.expression.EvaluationException;
 import org.springframework.expression.Expression;
 import org.springframework.expression.ExpressionParser;
 import org.springframework.expression.ParseException;
 import org.springframework.expression.spel.standard.SpelExpressionParser;
 
+import de.dlr.proseo.logging.logger.ProseoLogger;
 import de.dlr.proseo.model.enums.ProductQuality;
 import de.dlr.proseo.model.enums.ProductionType;
 
@@ -52,7 +53,10 @@ import de.dlr.proseo.model.enums.ProductionType;
 		@Index(unique = true, columnList = "uuid"),
 		@Index(unique = false, columnList = "product_class_id, sensing_start_time"), 
 		@Index(unique = false, columnList = "product_class_id, sensing_stop_time"), 
-		@Index(unique = false, columnList = "product_class_id, generation_time") })
+		@Index(unique = false, columnList = "product_class_id, generation_time"), 
+		@Index(unique = false, columnList = "eviction_time"),
+		@Index(unique = false, columnList = "publication_time"),
+		@Index(unique = false, columnList = "enclosing_product_id")})
 public class Product extends PersistentObject {
 	
 	private static final String MSG_FILENAME_TEMPLATE_NOT_FOUND = "Product filename template for mission not found";
@@ -64,7 +68,7 @@ public class Product extends PersistentObject {
 	private UUID uuid;
 	
 	/** Product class this products instantiates */
-	@ManyToOne
+	@ManyToOne(fetch = FetchType.LAZY)
 	private ProductClass productClass;
 	
 	/** One of the file classes defined for the mission (Ground Segment FIle Format Standard, sec. 4.1.2) */
@@ -85,9 +89,39 @@ public class Product extends PersistentObject {
 	@Column(name = "sensing_stop_time", columnDefinition = "TIMESTAMP(6)")
 	private Instant sensingStopTime;
 	
+	/**
+	 * The latest point in time, at which the input satellite raw data (e. g. CADU chunks) for this product or any of its 
+	 * input products became available for processing. This timestamp is primarily used to control timeliness requirements
+	 * in systematic processing.
+	 */
+	@Column(name = "raw_data_availability_time", columnDefinition = "TIMESTAMP(6)")
+	private Instant rawDataAvailabilityTime;
+	
 	/** Product generation time */
 	@Column(name = "generation_time", columnDefinition = "TIMESTAMP(6)")
 	private Instant generationTime;
+	
+	/**
+	 * Earliest time, at which a product file for this product was ingested; this timestamp will be preserved even after
+	 * the deletion of all related product files
+	 */
+	@Column(name = "publication_time", columnDefinition = "TIMESTAMP(6)")
+	private Instant publicationTime;
+	
+	/**
+	 * The time from which on this product including its product files will be deleted from prosEO, unless other consistency
+	 * constraints (e. g. existing processing orders) prevent it. Computed as the product generation time plus the product
+	 * retention period from the generating processing order or from the mission. If the eviction time is not set and cannot
+	 * be computed, then no automatic product deletion takes place.
+	 */
+	@Column(name = "eviction_time", columnDefinition = "TIMESTAMP(6)")
+	private Instant evictionTime;
+	
+	/**
+	 * The download history for this product
+	 */
+	@ElementCollection
+	private Set<DownloadHistory> downloadHistory = new HashSet<>();
 	
 	/** Type of production process generating this product */
 	@Enumerated(EnumType.STRING)
@@ -98,7 +132,7 @@ public class Product extends PersistentObject {
 	private Set<Product> componentProducts = new HashSet<>();
 	
 	/** Product for which this product is a component */
-	@ManyToOne
+	@ManyToOne(fetch = FetchType.LAZY)
 	private Product enclosingProduct;
 	
 	/**
@@ -108,7 +142,7 @@ public class Product extends PersistentObject {
 	 * must not extend further than into the following orbit (e. g. a near-realtime time slice beginning in one orbit, but also 
 	 * including some data from the subsequent orbit).
 	 */
-	@ManyToOne
+	@ManyToOne(fetch = FetchType.LAZY)
 	private Orbit orbit;
 	
 	/** Product files for this product */
@@ -120,11 +154,11 @@ public class Product extends PersistentObject {
 	private Set<ProductQuery> satisfiedProductQueries = new HashSet<>();
 	
 	/** Job step that produced this product (if any) */
-	@OneToOne
+	@OneToOne(fetch = FetchType.LAZY)
 	private JobStep jobStep;
 	
 	/** Processor configuration used for processing this product */
-	@ManyToOne
+	@ManyToOne(fetch = FetchType.LAZY)
 	private ConfiguredProcessor configuredProcessor;
 	
 	/**
@@ -134,7 +168,7 @@ public class Product extends PersistentObject {
 	private Map<String, Parameter> parameters = new HashMap<>();
 	
 	/** The logger for this class */
-	private static final Logger logger = LoggerFactory.getLogger(Product.class);
+	private static final ProseoLogger logger = new ProseoLogger(Product.class);
 	
 	/**
 	 * Gets the universally unique product identifier
@@ -252,6 +286,24 @@ public class Product extends PersistentObject {
 	}
 
 	/**
+	 * Gets the time of the availability of the satellite raw data
+	 * 
+	 * @return the raw data availability time
+	 */
+	public Instant getRawDataAvailabilityTime() {
+		return rawDataAvailabilityTime;
+	}
+	
+	/**
+	 * Sets the time of the availability of the satellite raw data
+	 * 
+	 * @param rawDataAvailabilityTime the raw data availability time to set
+	 */
+	public void setRawDataAvailabilityTime(Instant rawDataAvailabilityTime) {
+		this.rawDataAvailabilityTime = rawDataAvailabilityTime;
+	}
+	
+	/**
 	 * Gets the product generation time
 	 * 
 	 * @return the generationTime
@@ -269,6 +321,58 @@ public class Product extends PersistentObject {
 		this.generationTime = generationTime;
 	}
 	
+	/**
+	 * Gets the product publication (= ingestion) time
+	 * 
+	 * @return the publication time
+	 */
+	public Instant getPublicationTime() {
+		return publicationTime;
+	}
+	
+	/**
+	 * Sets the product publication (= ingestion) time
+	 * 
+	 * @param publicationTime the publication time to set
+	 */
+	public void setPublicationTime(Instant publicationTime) {
+		this.publicationTime = publicationTime;
+	}
+	
+	/**
+	 * Gets the product eviction time
+	 * 
+	 * @return the eviction time
+	 */
+	public Instant getEvictionTime() {
+		return evictionTime;
+	}
+	
+	/**
+	 * Sets the product eviction time
+	 * 
+	 * @param evictionTime the eviction time to set
+	 */
+	public void setEvictionTime(Instant evictionTime) {
+		this.evictionTime = evictionTime;
+	}
+	
+	/**
+	 * Gets the product download history
+	 * 
+	 * @return the download history
+	 */
+	public Set<DownloadHistory> getDownloadHistory() {
+		return downloadHistory;
+	}
+	/**
+	 * Sets the product download history
+	 * 
+	 * @param downloadHistory the download history to set
+	 */
+	public void setDownloadHistory(Set<DownloadHistory> downloadHistory) {
+		this.downloadHistory = downloadHistory;
+	}
 	/**
 	 * Gets the production type of the product
 	 * 
@@ -526,6 +630,32 @@ public class Product extends PersistentObject {
 	}
 	
 	/**
+	 * Get a named Instant parameter
+	 * 
+	 * @param key the name of the Instant parameter
+	 * @return the parameter value casted to Instant
+	 * @throws ClassCastException if the named parameter is not of an appropriate type
+	 */
+	public Instant getInstantParameter(String key) throws ClassCastException {
+		return parameters.get(key).getInstantValue();
+	}
+
+	/**
+	 * Set the named Instant parameter to the given value
+	 * 
+	 * @param key the parameter name
+	 * @param value the parameter value to set
+	 */
+	public void setInstantParameter(String key, TemporalAccessor value) {
+		Parameter param = parameters.get(key);
+		if (null == param) {
+			param = new Parameter();
+		}
+		param.setInstantValue(value);
+		this.parameters.put(key, param);
+	}
+	
+	/**
 	 * Generates a product filename according to the file name template given for the enclosing mission
 	 * 
 	 * @return a filename string
@@ -558,8 +688,12 @@ public class Product extends PersistentObject {
 		ExpressionParser parser = new SpelExpressionParser();
 		List<String> replacedExpressions = new ArrayList<>();
 		for (String expression: expressions) {
-			Expression exp = parser.parseExpression(expression);
-			replacedExpressions.add((String) exp.getValue(this));
+			try {
+				Expression exp = parser.parseExpression(expression);
+				replacedExpressions.add((String) exp.getValue(this));
+			} catch (EvaluationException e) {
+				throw new EvaluationException(e.getMessage() + "\n Parameter expression: " + expression);
+			}
 		}
 		if (logger.isDebugEnabled()) logger.debug("Replaced expressions: " + replacedExpressions);
 		
@@ -587,17 +721,13 @@ public class Product extends PersistentObject {
 	}
 	@Override
 	public int hashCode() {
-		final int prime = 31;
-		int result = super.hashCode();
-		result = prime * result + Objects.hash(configuredProcessor, fileClass, mode, parameters, productClass,
-				productQuality, productionType, sensingStartTime, sensingStopTime);
-		return result;
+		return Objects.hash(productClass, sensingStartTime); // most distinguishing attributes
 	}
 	/**
 	 * Tests equality of products based on their attribute values. Returns true if either of the following alternatives holds:
 	 * <ol>
 	 *   <li>The database IDs are equal</li>
-	 *   <li>The UUIDs are equal</li>
+	 *   <li>The UUIDs are equal or at least one of the UUIDs is null (i.e. they do not have different UUIDs)</li>
 	 *   <li>All of the following attributes are equal:
 	 *     <ul>
 	 *       <li>Product class</li>
@@ -607,7 +737,7 @@ public class Product extends PersistentObject {
 	 *       <li>File class</li>
 	 *       <li>Product quality</li>
 	 *       <li>Production type</li>
-	 *       <li>All product parameters</li>
+	 *       <li>All product parameters present in both products (additional parameters on either product will be ignored)</li>
 	 *     </ul>
 	 *   </li>
 	 * </ol>
@@ -619,21 +749,46 @@ public class Product extends PersistentObject {
 	 */
 	@Override
 	public boolean equals(Object obj) {
+		// Object identity
 		if (this == obj)
 			return true;
+		
+		// Same database object
 		if (super.equals(obj))
 			return true;
+		
 		if (!(obj instanceof Product))
 			return false;
 		Product other = (Product) obj;
-		if (uuid.equals(other.uuid))
-			return true;
-		return Objects.equals(configuredProcessor, other.configuredProcessor) && Objects.equals(fileClass, other.fileClass)
-				&& Objects.equals(mode, other.mode)
-				&& Objects.equals(parameters, other.parameters) && Objects.equals(productClass, other.productClass)
-				&& productQuality == other.productQuality && productionType == other.productionType
-				&& Objects.equals(sensingStartTime, other.sensingStartTime)
-				&& Objects.equals(sensingStopTime, other.sensingStopTime);
+		
+		// Same UUIDs or at least one UUID is null
+		if (null != uuid) {
+			if (uuid.equals(other.getUuid())) {
+				return true;
+			}
+			else if (null != other.getUuid()) {
+				// both UUIDs set, and they are different
+				return false;
+			}
+		}
+		// At least one UUID is null, so compare attributes
+		
+		// Overlapping parameters are the same (mandatory, but not sufficient)
+		for (String key: parameters.keySet()) {
+			if (other.getParameters().containsKey(key) && !parameters.get(key).equals(other.getParameters().get(key))) {
+				return false;
+			}
+		}
+		
+		// All other attributes mentioned above are the same (mandatory and sufficient)
+		return Objects.equals(configuredProcessor, other.getConfiguredProcessor())
+				&& Objects.equals(fileClass, other.getFileClass())
+				&& Objects.equals(mode, other.getMode())
+				&& Objects.equals(productClass, other.getProductClass())
+				&& productQuality == other.getProductQuality()
+				&& productionType == other.getProductionType()
+				&& Objects.equals(sensingStartTime, other.getSensingStartTime())
+				&& Objects.equals(sensingStopTime, other.getSensingStopTime());
 	}
 
 }

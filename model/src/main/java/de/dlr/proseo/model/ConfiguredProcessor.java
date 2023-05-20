@@ -9,6 +9,7 @@ import java.util.Objects;
 import java.util.UUID;
 
 import javax.persistence.Entity;
+import javax.persistence.FetchType;
 import javax.persistence.Index;
 import javax.persistence.ManyToOne;
 import javax.persistence.Table;
@@ -22,14 +23,14 @@ import javax.persistence.Table;
  */
 @Entity
 @Table(indexes = {
-	@Index(unique = true, columnList = "identifier"),
+	@Index(unique = false, columnList = "identifier"),
 	@Index(unique = true, columnList = "uuid")
 })
 public class ConfiguredProcessor extends PersistentObject {
 
 	/** 
 	 * User-defined identifier for this processor configuration (recommended to be derived from ProcessorClass::processorName and
-	 * the version information of the associated Processor and Configuration objects)
+	 * the version information of the associated Processor and Configuration objects), unique within the mission
 	 */
 	private String identifier;
 	
@@ -39,11 +40,11 @@ public class ConfiguredProcessor extends PersistentObject {
 	private UUID uuid;
 	
 	/** The processor version */
-	@ManyToOne
+	@ManyToOne(fetch = FetchType.LAZY)
 	private Processor processor;
 	
 	/** The configuration file version */
-	@ManyToOne
+	@ManyToOne(fetch = FetchType.LAZY)
 	private Configuration configuration;
 	
 	/**
@@ -144,22 +145,23 @@ public class ConfiguredProcessor extends PersistentObject {
 
 	@Override
 	public int hashCode() {
-		final int prime = 31;
-		int result = super.hashCode();
-		result = prime * result + Objects.hash(identifier);
-		return result;
+		return Objects.hash(identifier);
 	}
 
 	@Override
 	public boolean equals(Object obj) {
+		// Object identity
 		if (this == obj)
 			return true;
-		if (!super.equals(obj))
-			return false;
+		
+		// Same database object
+		if (super.equals(obj))
+			return true;
+		
 		if (!(obj instanceof ConfiguredProcessor))
 			return false;
 		ConfiguredProcessor other = (ConfiguredProcessor) obj;
-		return Objects.equals(identifier, other.identifier);
+		return Objects.equals(identifier, other.getIdentifier());
 	}
 
 	@Override

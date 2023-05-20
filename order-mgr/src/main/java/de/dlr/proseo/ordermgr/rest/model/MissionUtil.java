@@ -1,18 +1,20 @@
 package de.dlr.proseo.ordermgr.rest.model;
 
+import java.time.Duration;
 import java.util.ArrayList;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import java.util.List;
 
+import de.dlr.proseo.logging.logger.ProseoLogger;
 import de.dlr.proseo.model.Mission;
+import de.dlr.proseo.model.Payload;
 import de.dlr.proseo.model.Spacecraft;
 import de.dlr.proseo.model.rest.model.RestMission;
+import de.dlr.proseo.model.rest.model.RestPayload;
 import de.dlr.proseo.model.rest.model.RestSpacecraft;
 
 public class MissionUtil {
 	/** A logger for this class */
-	private static Logger logger = LoggerFactory.getLogger(MissionUtil.class);
+	private static ProseoLogger logger = new ProseoLogger(MissionUtil.class);
 
 	/**
 	 * Convert a prosEO model Mission into a REST Mission
@@ -41,6 +43,15 @@ public class MissionUtil {
 		if (null != modelMission.getProductFileTemplate()) {
 			restMission.setProductFileTemplate(modelMission.getProductFileTemplate());
 		}
+		if (null != modelMission.getProcessingCentre()) {
+			restMission.setProcessingCentre(modelMission.getProcessingCentre());
+		}
+		if (null != modelMission.getProductRetentionPeriod()) {
+			restMission.setProductRetentionPeriod(modelMission.getProductRetentionPeriod().getSeconds());
+		}
+		if (null != modelMission.getOrderRetentionPeriod()) {
+			restMission.setOrderRetentionPeriod(modelMission.getOrderRetentionPeriod().getSeconds());
+		}
 
 		if (null != modelMission.getFileClasses()) {
 			restMission.getFileClasses().addAll(modelMission.getFileClasses());
@@ -53,8 +64,16 @@ public class MissionUtil {
 			List<RestSpacecraft> restSpacecrafts = new ArrayList<RestSpacecraft>();
 
 			for (Spacecraft modelSpacecraft : modelMission.getSpacecrafts()) {
+				List<RestPayload> restPayloads = null;
+				if (!modelSpacecraft.getPayloads().isEmpty()) {
+					restPayloads = new ArrayList<>();
+					for (Payload payload : modelSpacecraft.getPayloads()) {
+						RestPayload restPayload = new RestPayload(payload.getName(), payload.getDescription());
+						restPayloads.add(restPayload);
+					}
+				}
 				RestSpacecraft restFinal = new RestSpacecraft(modelSpacecraft.getId(), Long.valueOf(modelSpacecraft.getVersion()),
-						modelSpacecraft.getCode(), modelSpacecraft.getName());
+						modelSpacecraft.getCode(), modelSpacecraft.getName(), restPayloads);
 				restSpacecrafts.add(restFinal);
 			}
 			restMission.setSpacecrafts(restSpacecrafts);
@@ -90,6 +109,16 @@ public class MissionUtil {
 		modelMission.setCode(restMission.getCode());
 		modelMission.setName(restMission.getName());
 		modelMission.setProductFileTemplate(restMission.getProductFileTemplate());
+		
+		if (null != restMission.getProcessingCentre()) {
+			modelMission.setProcessingCentre(restMission.getProcessingCentre());
+		}
+		if (null != restMission.getProductRetentionPeriod()) {
+			modelMission.setProductRetentionPeriod(Duration.ofSeconds(restMission.getProductRetentionPeriod()));
+		}
+		if (null != restMission.getOrderRetentionPeriod()) {
+			modelMission.setOrderRetentionPeriod(Duration.ofSeconds(restMission.getOrderRetentionPeriod()));
+		}
 
 		modelMission.getFileClasses().addAll(restMission.getFileClasses());
 		modelMission.getProcessingModes().addAll(restMission.getProcessingModes());

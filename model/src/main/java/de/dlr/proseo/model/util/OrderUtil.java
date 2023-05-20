@@ -2,6 +2,7 @@ package de.dlr.proseo.model.util;
 
 import java.time.DateTimeException;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
@@ -9,13 +10,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
+import de.dlr.proseo.logging.logger.ProseoLogger;
 import de.dlr.proseo.model.ConfiguredProcessor;
+import de.dlr.proseo.model.Job.JobState;
+import de.dlr.proseo.model.JobStep.JobStepState;
 import de.dlr.proseo.model.Orbit;
 import de.dlr.proseo.model.Parameter;
-import de.dlr.proseo.model.Parameter.ParameterType;
+import de.dlr.proseo.model.enums.ParameterType;
 import de.dlr.proseo.model.ProcessingOrder;
 import de.dlr.proseo.model.enums.OrderSlicingType;
 import de.dlr.proseo.model.enums.OrderState;
@@ -25,11 +26,12 @@ import de.dlr.proseo.model.rest.model.RestInputFilter;
 import de.dlr.proseo.model.rest.model.RestOrbitQuery;
 import de.dlr.proseo.model.rest.model.RestOrder;
 import de.dlr.proseo.model.rest.model.RestParameter;
+import de.dlr.proseo.model.service.RepositoryService;
 import de.dlr.proseo.model.ProductClass;
 
 public class OrderUtil {
 	/** A logger for this class */
-	private static Logger logger = LoggerFactory.getLogger(OrderUtil.class);
+	private static ProseoLogger logger = new ProseoLogger(OrderUtil.class);
 	
 	/**
 	 * Convert a prosEO model ProcessingOrder into a REST Order
@@ -63,13 +65,16 @@ public class OrderUtil {
 			restOrder.setOrderState(processingOrder.getOrderState().toString());
 		}
 		if (null != processingOrder.getStartTime()) {
-			restOrder.setStartTime(Date.from(processingOrder.getStartTime()));
+			restOrder.setStartTime(OrbitTimeFormatter.format(processingOrder.getStartTime()));
 		}
 		if (null != processingOrder.getStopTime()) {
-			restOrder.setStopTime(Date.from(processingOrder.getStopTime()));
+			restOrder.setStopTime(OrbitTimeFormatter.format(processingOrder.getStopTime()));
 		}
 		if (null != processingOrder.getExecutionTime()) {
 			restOrder.setExecutionTime(Date.from(processingOrder.getExecutionTime()));
+		}
+		if (null != processingOrder.getEvictionTime()) {
+			restOrder.setEvictionTime(Date.from(processingOrder.getEvictionTime()));
 		}
 		if(null != processingOrder.getSlicingType()) {
 			restOrder.setSlicingType(processingOrder.getSlicingType().name());
@@ -144,6 +149,9 @@ public class OrderUtil {
 		if (null != processingOrder.getProductionType()) {
 			restOrder.setProductionType(processingOrder.getProductionType().toString());
 		}
+		if (null != processingOrder.getProductRetentionPeriod()) {
+			restOrder.setProductRetentionPeriod(processingOrder.getProductRetentionPeriod().getSeconds());
+		}
 		if (null != processingOrder.hasFailedJobSteps()) {
 			restOrder.setHasFailedJobSteps(processingOrder.hasFailedJobSteps());
 		}
@@ -182,8 +190,69 @@ public class OrderUtil {
 
 			restOrder.setOrbits(orbitQueries);
 		}
+
+		// Get job and job step statistics for display
+		List<String> jobStepStates = new ArrayList<>();
+		Long jsCountRunning = 0L;
+		Long jsCountFailed = 0L;
+		Long jsCountCompleted = 0L;
+		Long jsCountTotal = 0L;
 		
-	
+		if (logger.isTraceEnabled()) logger.trace("... checking job step states for order with DBID = {}", processingOrder.getId());
+		List<Object[]> resultRecords = RepositoryService.getJobStepRepository().countJobStepStatesByOrderId(processingOrder.getId());
+		if (logger.isTraceEnabled()) logger.trace("... found {} different job step states", resultRecords.size());
+		
+		for (Object[] resultRecord: resultRecords) {
+			if (logger.isTraceEnabled()) logger.trace("... checking job step state {} (class {}) with count {} (class {})", 
+					resultRecord[0], resultRecord[0].getClass().getCanonicalName(), resultRecord[1], resultRecord[1].getClass().getCanonicalName());
+			if (resultRecord[0] instanceof JobStepState && resultRecord[1] instanceof Long) {
+				String jsState = ((JobStepState) resultRecord[0]).toString();
+				jobStepStates.add(jsState);
+
+				switch(jsState) {
+				case "RUNNING":
+					jsCountRunning += (Long) resultRecord[1];
+					break;
+				case "COMPLETED":
+					jsCountCompleted += (Long) resultRecord[1];
+					break;
+				case "FAILED":
+					jsCountFailed += (Long) resultRecord[1];
+					break;
+				}
+				jsCountTotal += (Long) resultRecord[1];
+			}
+		}
+		if (logger.isTraceEnabled()) logger.trace("... found {} total job steps, of which {} running, {} failed, {} completed", 
+				jsCountTotal, jsCountRunning, jsCountFailed, jsCountCompleted);
+		
+		// Create job step statistics
+		restOrder.setHasFailedJobSteps(jsCountFailed > 0);
+		restOrder.setJobStepStates(jobStepStates);
+		if (0 < jsCountTotal) {
+			restOrder.setPercentCompleted(jsCountCompleted * 100 / jsCountTotal);
+			restOrder.setPercentFailed(jsCountFailed * 100 / jsCountTotal);
+			restOrder.setPercentRunning(jsCountRunning * 100 / jsCountTotal);
+		} else {
+			restOrder.setPercentCompleted(0L);
+			restOrder.setPercentFailed(0L);
+			restOrder.setPercentRunning(0L);
+		}
+		// Create job statistics
+		int expectedCount = processingOrder.getJobs().size();
+		if (logger.isTraceEnabled()) logger.trace("... found {} total jobs for order in state {}", expectedCount, processingOrder.getOrderState());
+		int plannedCount = RepositoryService.getJobRepository().countAllByJobStateAndProcessingOrder(JobState.PLANNED, processingOrder.getId());
+		if (logger.isTraceEnabled()) logger.trace("... found {} planned jobs", plannedCount);
+		int createdCount = 0;
+		if (processingOrder.getOrderState() == OrderState.PLANNING) {
+			createdCount = plannedCount;
+		} else if (processingOrder.getOrderState() == OrderState.RELEASING) {
+			createdCount = expectedCount - plannedCount;
+		}
+		if (logger.isTraceEnabled()) logger.trace("... calculated {} created jobs", createdCount);
+		restOrder.setExpectedJobs(Long.valueOf(expectedCount));
+		restOrder.setCreatedJobs(Long.valueOf(createdCount));
+		
 		return restOrder;
 	}
 
@@ -215,7 +284,7 @@ public class OrderUtil {
 
 		if (null != restOrder.getStartTime()) {
 			try {
-				processingOrder.setStartTime(restOrder.getStartTime().toInstant());
+				processingOrder.setStartTime(Instant.from(OrbitTimeFormatter.parse(restOrder.getStartTime())));
 
 			} catch (DateTimeException e) {
 				throw new IllegalArgumentException(String.format("Invalid sensing start time '%s'", restOrder.getStartTime()));
@@ -223,7 +292,7 @@ public class OrderUtil {
 		}
 		if (null != restOrder.getStopTime()) {
 			try {
-				processingOrder.setStopTime(restOrder.getStopTime().toInstant());
+				processingOrder.setStopTime(Instant.from(OrbitTimeFormatter.parse(restOrder.getStopTime())));
 			} catch (DateTimeException e) {
 				throw new IllegalArgumentException(String.format("Invalid sensing stop time '%s'", restOrder.getStartTime()));
 			} 
@@ -232,7 +301,14 @@ public class OrderUtil {
 			try {
 				processingOrder.setExecutionTime(restOrder.getExecutionTime().toInstant());
 			} catch (DateTimeException e) {
-				throw new IllegalArgumentException(String.format("Invalid sensing stop time '%s'", restOrder.getExecutionTime()));
+				throw new IllegalArgumentException(String.format("Invalid execution time '%s'", restOrder.getExecutionTime()));
+			} 
+		}
+		if (null != restOrder.getEvictionTime()) {
+			try {
+				processingOrder.setEvictionTime(restOrder.getEvictionTime().toInstant());
+			} catch (DateTimeException e) {
+				throw new IllegalArgumentException(String.format("Invalid eviction time '%s'", restOrder.getEvictionTime()));
 			} 
 		}
 		if (null != restOrder.getOutputFileClass()) {
@@ -265,6 +341,9 @@ public class OrderUtil {
 		}
 		if (null != restOrder.getProductionType()) {
 			processingOrder.setProductionType(ProductionType.valueOf(restOrder.getProductionType()));
+		}
+		if (null != restOrder.getProductRetentionPeriod()) {
+			processingOrder.setProductRetentionPeriod(Duration.ofSeconds(restOrder.getProductRetentionPeriod()));
 		}
 		if (null != restOrder.getHasFailedJobSteps()) {
 			processingOrder.setHasFailedJobSteps(restOrder.getHasFailedJobSteps());

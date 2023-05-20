@@ -8,6 +8,7 @@ package de.dlr.proseo.ordermgr.rest;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
@@ -17,8 +18,6 @@ import javax.persistence.PersistenceContext;
 import javax.persistence.Query;
 import javax.validation.Valid;
 
-import org.slf4j.LoggerFactory;
-import org.slf4j.Logger;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.web.client.RestTemplateBuilder;
 import org.springframework.http.HttpHeaders;
@@ -30,12 +29,22 @@ import org.springframework.transaction.TransactionException;
 import org.springframework.transaction.support.TransactionTemplate;
 import de.dlr.proseo.model.rest.MissionController;
 import de.dlr.proseo.model.rest.model.RestMission;
+import de.dlr.proseo.model.rest.model.RestPayload;
 import de.dlr.proseo.model.rest.model.RestSpacecraft;
 import de.dlr.proseo.ordermgr.OrdermgrConfiguration;
 import de.dlr.proseo.ordermgr.rest.model.MissionUtil;
+import de.dlr.proseo.logging.http.HttpPrefix;
+import de.dlr.proseo.logging.http.ProseoHttp;
+import de.dlr.proseo.logging.logger.ProseoLogger;
+import de.dlr.proseo.logging.messages.GeneralMessage;
+import de.dlr.proseo.logging.messages.OrderMgrMessage;
 import de.dlr.proseo.model.Configuration;
 import de.dlr.proseo.model.ConfiguredProcessor;
 import de.dlr.proseo.model.Mission;
+import de.dlr.proseo.model.MonProductProductionDay;
+import de.dlr.proseo.model.MonProductProductionHour;
+import de.dlr.proseo.model.MonProductProductionMonth;
+import de.dlr.proseo.model.Payload;
 import de.dlr.proseo.model.ProcessingOrder;
 import de.dlr.proseo.model.Processor;
 import de.dlr.proseo.model.ProcessorClass;
@@ -53,52 +62,6 @@ import de.dlr.proseo.model.service.SecurityService;
  */
 @Component
 public class MissionControllerImpl implements MissionController {
-
-	/* Message ID constants */
-	private static final int MSG_ID_MISSION_NOT_FOUND = 1001;
-	private static final int MSG_ID_NO_MISSIONS_FOUND = 1002;
-	private static final int MSG_ID_DELETION_UNSUCCESSFUL = 1004;
-	private static final int MSG_ID_DELETE_PRODUCTS_WITHOUT_FORCE = 1005;
-	private static final int MSG_ID_PRODUCTS_EXIST = 1006;
-	private static final int MSG_ID_PRODUCTCLASSES_EXIST = 1007;
-	private static final int MSG_ID_PROCESSORCLASSES_EXIST = 1008;
-	private static final int MSG_ID_MISSION_DELETED = 1010;
-	private static final int MSG_ID_MISSION_UPDATED = 1011;
-	private static final int MSG_ID_MISSION_RETRIEVED = 1012;
-	private static final int MSG_ID_MISSION_CREATED = 1013;
-	private static final int MSG_ID_MISSIONS_RETRIEVED = 1014;
-	private static final int MSG_ID_MISSION_EXISTS = 1015;
-	private static final int MSG_ID_SPACECRAFT_EXISTS = 1016;
-	private static final int MSG_ID_MISSION_CODE_MISSING = 1017;
-	private static final int MSG_ID_MISSION_NOT_MODIFIED = 1018;
-
-	// Same as in other services
-	private static final int MSG_ID_ILLEGAL_CROSS_MISSION_ACCESS = 2028;
-
-	/* Message string constants */
-	private static final String MSG_NO_MISSIONS_FOUND = "(E%d) No missions found";
-	private static final String MSG_MISSION_NOT_FOUND = "(E%d) No mission found for ID %d";
-	private static final String MSG_DELETION_UNSUCCESSFUL = "(E%d) Mission deletion unsuccessful for ID %d";
-	private static final String MSG_DELETE_PRODUCTS_WITHOUT_FORCE = "(E%d) Option 'delete-products' not valid without option 'force'";
-	private static final String MSG_PRODUCTS_EXIST = "(E%d) Cannot delete mission %s due to existing products";
-	private static final String MSG_PRODUCTCLASSES_EXIST = "(E%d) Cannot delete mission %s due to existing product classes";
-	private static final String MSG_PROCESSORCLASSES_EXIST = "(E%d) Cannot delete mission %s due to existing processor classes";
-	private static final String MSG_MISSION_EXISTS = "(E%d) Mission with mission code %s already exists";
-	private static final String MSG_SPACECRAFT_EXISTS = "(E%d) Spacecraft with spacecraft code %s already exists";
-	private static final String MSG_MISSION_CODE_MISSING = "(E%d) No mission code given";
-
-	private static final String MSG_MISSION_DELETED = "(I%d) Mission with database ID %d deleted";
-	private static final String MSG_MISSION_UPDATED = "(I%d) Mission %s updated";
-	private static final String MSG_MISSION_RETRIEVED = "(I%d) Mission %s retrieved";
-	private static final String MSG_MISSION_CREATED = "(I%d) Mission %s created";
-	private static final String MSG_MISSIONS_RETRIEVED = "(I%d) All missions retrieved";
-	private static final String MSG_MISSION_NOT_MODIFIED = "(I%d) Mission with id %d not modified (no changes)";
-
-	// Same as in other services
-	private static final String MSG_ILLEGAL_CROSS_MISSION_ACCESS = "(E%d) Illegal cross-mission access to mission %s (logged in to %s)";
-	
-	private static final String HTTP_HEADER_WARNING = "Warning";
-	private static final String MSG_PREFIX = "199 proseo-ordermgr-missioncontroller ";
 	
 	/** The Order Manager configuration */
 	@Autowired
@@ -121,19 +84,8 @@ public class MissionControllerImpl implements MissionController {
 	private EntityManager em;
 
 	/** A logger for this class */
-	private static Logger logger = LoggerFactory.getLogger(MissionControllerImpl.class);
-
-	/**
-	 * Create an HTTP "Warning" header with the given text message
-	 * 
-	 * @param message the message text
-	 * @return an HttpHeaders object with a warning message
-	 */
-	private HttpHeaders errorHeaders(String message) {
-		HttpHeaders responseHeaders = new HttpHeaders();
-		responseHeaders.set(HTTP_HEADER_WARNING, MSG_PREFIX + message.replaceAll("\n", " "));
-		return responseHeaders;
-	}
+	private static ProseoLogger logger = new ProseoLogger(MissionControllerImpl.class);
+	private static ProseoHttp http = new ProseoHttp(logger, HttpPrefix.ORDER_MGR);
 
 	/**
 	 * List of all missions with no search criteria
@@ -141,7 +93,7 @@ public class MissionControllerImpl implements MissionController {
 	 * @return a response entity with either a list of missions and HTTP status OK or an error message and an HTTP status indicating failure
 	 */
 	@Override
-	public ResponseEntity<List<RestMission>> getMissions() {
+	public ResponseEntity<List<RestMission>> getMissions(String code) {
 		if (logger.isTraceEnabled()) logger.trace(">>> getMissions");
 
 		TransactionTemplate transactionTemplate = new TransactionTemplate(txManager);
@@ -150,32 +102,41 @@ public class MissionControllerImpl implements MissionController {
 		try {
 			result = transactionTemplate.execute((status) -> {
 				List<RestMission> resultList = new ArrayList<>();
+				if (code != null) {
+					Mission mission = RepositoryService.getMissionRepository().findByCode(code);
+					if (mission == null) {
+						throw new NoResultException(logger.log(OrderMgrMessage.MISSION_NOT_FOUND, code));
+					}
 
-				List<Mission> modelMissions = RepositoryService.getMissionRepository().findAll();
-
-				if(modelMissions.isEmpty()) {
-					throw new NoResultException(String.format(MSG_NO_MISSIONS_FOUND, MSG_ID_NO_MISSIONS_FOUND));
-				}
-
-				// Simple case: no search criteria set
-				for (Mission  mission: modelMissions) {
 					if (logger.isDebugEnabled()) logger.debug("Found mission with ID {}", mission.getId());
 					RestMission resultMission = MissionUtil.toRestMission(mission);
 					if (logger.isDebugEnabled()) logger.debug("Created result mission with ID {}", resultMission.getId());
-					resultList.add(resultMission);
+					resultList.add(resultMission);					
+				} else {
+					List<Mission> modelMissions = RepositoryService.getMissionRepository().findAll();
+
+					if(modelMissions.isEmpty()) {
+						throw new NoResultException(logger.log(OrderMgrMessage.NO_MISSIONS_FOUND));
+					}
+
+					// Simple case: no search criteria set
+					for (Mission  mission: modelMissions) {
+						if (logger.isDebugEnabled()) logger.debug("Found mission with ID {}", mission.getId());
+						RestMission resultMission = MissionUtil.toRestMission(mission);
+						if (logger.isDebugEnabled()) logger.debug("Created result mission with ID {}", resultMission.getId());
+						resultList.add(resultMission);
+					}
 				}
 				
 				return resultList;
 			});
 		} catch (NoResultException e) {
-			logger.error(e.getMessage());
-			return new ResponseEntity<>(errorHeaders(e.getMessage()), HttpStatus.NOT_FOUND);
+			return new ResponseEntity<>(http.errorHeaders(e.getMessage()), HttpStatus.NOT_FOUND);
 		} catch (TransactionException e) {
-			logger.error(e.getMessage());
-			return new ResponseEntity<>(errorHeaders(e.getMessage()), HttpStatus.INTERNAL_SERVER_ERROR);
+			return new ResponseEntity<>(http.errorHeaders(e.getMessage()), HttpStatus.INTERNAL_SERVER_ERROR);
 		}
 
-		logger.info(String.format(MSG_MISSIONS_RETRIEVED, MSG_ID_MISSIONS_RETRIEVED));
+		logger.log(OrderMgrMessage.MISSIONS_RETRIEVED);
 		
 		return new ResponseEntity<>(result, HttpStatus.OK);
 	}
@@ -194,7 +155,7 @@ public class MissionControllerImpl implements MissionController {
 		
 		// Check valid mission code
 		if (null == mission.getCode() || mission.getCode().isBlank()) {
-			throw new IllegalArgumentException(String.format(MSG_MISSION_CODE_MISSING, MSG_ID_MISSION_CODE_MISSING, mission.getCode()));
+			throw new IllegalArgumentException(logger.log(OrderMgrMessage.MISSION_CODE_MISSING, mission.getCode()));
 		}
 
 		TransactionTemplate transactionTemplate = new TransactionTemplate(txManager);
@@ -206,26 +167,55 @@ public class MissionControllerImpl implements MissionController {
 
 				// Check, whether mission exists already
 				if (null != RepositoryService.getMissionRepository().findByCode(mission.getCode())) {
-					throw new IllegalArgumentException(String.format(MSG_MISSION_EXISTS, MSG_ID_MISSION_EXISTS, mission.getCode()));
+					throw new IllegalArgumentException(logger.log(OrderMgrMessage.MISSION_EXISTS, mission.getCode()));
 				}
+				
+				// Ensure mandatory attributes are set
+				if (null == mission.getName() || mission.getName().isBlank()) {
+					throw new IllegalArgumentException(logger.log(GeneralMessage.FIELD_NOT_SET, "name", "mission creation"));
+				}				
+				if (null == mission.getCode() || mission.getCode().isBlank()) {
+					throw new IllegalArgumentException(logger.log(GeneralMessage.FIELD_NOT_SET, "code", "mission creation"));
+				}				
+				if (null == mission.getProductFileTemplate() || mission.getProductFileTemplate().isBlank()) {
+					throw new IllegalArgumentException(logger.log(GeneralMessage.FIELD_NOT_SET, "productFileTemplate", "mission creation"));
+				}	
 
+				// If list attributes were set to null explicitly, initialize with empty lists
+				if (null == mission.getFileClasses()) {
+					mission.setFileClasses(new ArrayList<>());
+				}	
+				if (null == mission.getProcessingModes()) {
+					mission.setProcessingModes(new ArrayList<>());
+				}	
+				if (null == mission.getSpacecrafts()) {
+					mission.setSpacecrafts(new ArrayList<>());
+				}	
+				
 				modelMission = RepositoryService.getMissionRepository().save(modelMission);
 
 				// Add spacecraft details
 				modelMission.getSpacecrafts().clear();
 				for (RestSpacecraft restSpacecraft : mission.getSpacecrafts()) {
 					Spacecraft modelSpacecraft = new Spacecraft();
-					if (null != RepositoryService.getSpacecraftRepository().findByCode(restSpacecraft.getCode())) {
-						// If such a spacecraft would be found, it would already belong to a different mission!
-						throw new IllegalArgumentException(String.format(MSG_SPACECRAFT_EXISTS, MSG_ID_SPACECRAFT_EXISTS, restSpacecraft.getCode()));
-					}
-					else {
-						modelSpacecraft.setCode(restSpacecraft.getCode());
-						modelSpacecraft.setName(restSpacecraft.getName());
-						modelSpacecraft.setMission(modelMission);
-						modelSpacecraft = RepositoryService.getSpacecraftRepository().save(modelSpacecraft);
+					if (null != RepositoryService.getSpacecraftRepository().findByMissionAndCode(mission.getCode(), restSpacecraft.getCode())) {
+						throw new IllegalArgumentException(logger.log(OrderMgrMessage.SPACECRAFT_EXISTS, 
+								restSpacecraft.getCode(), mission.getCode()));
 					}
 
+					modelSpacecraft.setCode(restSpacecraft.getCode());
+					modelSpacecraft.setName(restSpacecraft.getName());
+					modelSpacecraft.setMission(modelMission);
+					if (null != restSpacecraft.getPayloads()) {
+						for (RestPayload restPayload : restSpacecraft.getPayloads()) {
+							Payload modelPayload = new Payload();
+							modelPayload.setName(restPayload.getName());
+							modelPayload.setDescription(restPayload.getDescription());
+							modelSpacecraft.getPayloads().add(modelPayload);
+						}
+					}
+					
+					modelSpacecraft = RepositoryService.getSpacecraftRepository().save(modelSpacecraft);
 					modelMission.getSpacecrafts().add(modelSpacecraft);					
 				}		
 				modelMission = RepositoryService.getMissionRepository().save(modelMission);
@@ -233,14 +223,12 @@ public class MissionControllerImpl implements MissionController {
 				return MissionUtil.toRestMission(modelMission);
 			});
 		} catch (IllegalArgumentException e) {
-			logger.error(e.getMessage());
-			return new ResponseEntity<>(errorHeaders(e.getMessage()), HttpStatus.BAD_REQUEST);
+			return new ResponseEntity<>(http.errorHeaders(e.getMessage()), HttpStatus.BAD_REQUEST);
 		} catch (TransactionException e) {
-			logger.error(e.getMessage());
-			return new ResponseEntity<>(errorHeaders(e.getMessage()), HttpStatus.INTERNAL_SERVER_ERROR);
+			return new ResponseEntity<>(http.errorHeaders(e.getMessage()), HttpStatus.INTERNAL_SERVER_ERROR);
 		}
 
-		logger.info(String.format(MSG_MISSION_CREATED, MSG_ID_MISSION_CREATED, restMission.getCode()));
+		logger.log(OrderMgrMessage.MISSION_CREATED, restMission.getCode());
 		
 		return new ResponseEntity<>(restMission, HttpStatus.CREATED);
 
@@ -265,23 +253,22 @@ public class MissionControllerImpl implements MissionController {
 				Optional<Mission> modelMission = RepositoryService.getMissionRepository().findById(id);
 
 				if (modelMission.isEmpty()) {
-					throw new NoResultException(String.format(MSG_MISSION_NOT_FOUND, MSG_ID_MISSION_NOT_FOUND, id));
+					throw new NoResultException(logger.log(OrderMgrMessage.MISSION_NOT_FOUND, id));
 				}
 
 				return MissionUtil.toRestMission(modelMission.get());
 			});
 		} catch (NoResultException e) {
-			logger.error(e.getMessage());
-			return new ResponseEntity<>(errorHeaders(e.getMessage()), HttpStatus.NOT_FOUND);
+			return new ResponseEntity<>(http.errorHeaders(e.getMessage()), HttpStatus.NOT_FOUND);
 		} catch (TransactionException e) {
-			logger.error(e.getMessage());
-			return new ResponseEntity<>(errorHeaders(e.getMessage()), HttpStatus.INTERNAL_SERVER_ERROR);
+			return new ResponseEntity<>(http.errorHeaders(e.getMessage()), HttpStatus.INTERNAL_SERVER_ERROR);
 		}
 
-		logger.info(String.format(MSG_MISSION_RETRIEVED, MSG_ID_MISSION_RETRIEVED, restMission.getCode()));
+		logger.log(OrderMgrMessage.MISSION_RETRIEVED, restMission.getCode());
 		
 		return new ResponseEntity<>(restMission, HttpStatus.OK);
 	}
+
 
 	/**
 	 * Update the mission with the given ID with the attribute values of the given Json object. 
@@ -299,10 +286,9 @@ public class MissionControllerImpl implements MissionController {
 
 		// Ensure user is authorized for the mission to update
 		if (!securityService.isAuthorizedForMission(mission.getCode())) {
-			String message = String.format(MSG_ILLEGAL_CROSS_MISSION_ACCESS, MSG_ID_ILLEGAL_CROSS_MISSION_ACCESS,
-					mission.getCode(), securityService.getMission());			
-			logger.error(message);
-			return new ResponseEntity<>(errorHeaders(message), HttpStatus.FORBIDDEN);
+			String message = logger.log(GeneralMessage.ILLEGAL_CROSS_MISSION_ACCESS,
+					mission.getCode(), securityService.getMission());
+			return new ResponseEntity<>(http.errorHeaders(message), HttpStatus.FORBIDDEN);
 		}
 		
 		TransactionTemplate transactionTemplate = new TransactionTemplate(txManager);
@@ -314,10 +300,37 @@ public class MissionControllerImpl implements MissionController {
 				Optional<Mission> optModelMission = RepositoryService.getMissionRepository().findById(id);
 
 				if (optModelMission.isEmpty()) {
-					throw new NoResultException(String.format(MSG_MISSION_NOT_FOUND, MSG_ID_MISSION_NOT_FOUND, id));
+					throw new NoResultException(logger.log(OrderMgrMessage.MISSION_NOT_FOUND, id));
 				}
 				Mission modelMission = optModelMission.get();
 
+				// Check, whether mission exists already
+				if (null != RepositoryService.getMissionRepository().findByCode(mission.getCode())) {
+					throw new IllegalArgumentException(logger.log(OrderMgrMessage.MISSION_EXISTS, mission.getCode()));
+				}
+				
+				// Ensure mandatory attributes are set
+				if (null == mission.getName() || mission.getName().isBlank()) {
+					throw new IllegalArgumentException(logger.log(GeneralMessage.FIELD_NOT_SET, "name", "mission modification"));
+				}				
+				if (null == mission.getCode() || mission.getCode().isBlank()) {
+					throw new IllegalArgumentException(logger.log(GeneralMessage.FIELD_NOT_SET, "code", "mission modification"));
+				}				
+				if (null == mission.getProductFileTemplate() || mission.getProductFileTemplate().isBlank()) {
+					throw new IllegalArgumentException(logger.log(GeneralMessage.FIELD_NOT_SET, "productFileTemplate", "mission modification"));
+				}	
+				
+				// If list attributes were set to null explicitly, initialize with empty lists
+				if (null == mission.getFileClasses()) {
+					mission.setFileClasses(new ArrayList<>());
+				}	
+				if (null == mission.getProcessingModes()) {
+					mission.setProcessingModes(new ArrayList<>());
+				}	
+				if (null == mission.getSpacecrafts()) {
+					mission.setSpacecrafts(new ArrayList<>());
+				}	
+				
 				// Update modified attributes
 				boolean missionChanged = false;
 
@@ -333,11 +346,25 @@ public class MissionControllerImpl implements MissionController {
 					missionChanged = true;
 					modelMission.setProductFileTemplate(changedMission.getProductFileTemplate());
 				}
+				if (!Objects.equals(modelMission.getProcessingCentre(), changedMission.getProcessingCentre())) {
+					missionChanged = true;
+					modelMission.setProcessingCentre(changedMission.getProcessingCentre());
+				}
+				if (!Objects.equals(modelMission.getProductRetentionPeriod(), changedMission.getProductRetentionPeriod())) {
+					missionChanged = true;
+					modelMission.setProductRetentionPeriod(changedMission.getProductRetentionPeriod());
+				}
+				if (!Objects.equals(modelMission.getOrderRetentionPeriod(), changedMission.getOrderRetentionPeriod())) {
+					missionChanged = true;
+					modelMission.setOrderRetentionPeriod(changedMission.getOrderRetentionPeriod());
+				}
 				if (!modelMission.getFileClasses().equals(changedMission.getFileClasses()))	{
+					missionChanged = true;
 					modelMission.getFileClasses().clear();
 					modelMission.getFileClasses().addAll(changedMission.getFileClasses());
 				}
 				if (!modelMission.getProcessingModes().equals(changedMission.getProcessingModes())) {
+					missionChanged = true;
 					modelMission.getProcessingModes().clear();
 					modelMission.getProcessingModes().addAll(changedMission.getProcessingModes());
 				}
@@ -360,6 +387,7 @@ public class MissionControllerImpl implements MissionController {
 									spacecraftChanged = true;
 									modelSpacecraft.setName(restSpacecraft.getName());
 								}
+								spacecraftChanged = updatePayloads(modelSpacecraft.getPayloads(), restSpacecraft.getPayloads());
 								if (spacecraftChanged) {
 									modelSpacecraft.incrementVersion();
 									modelSpacecraft = RepositoryService.getSpacecraftRepository().save(modelSpacecraft);
@@ -373,6 +401,16 @@ public class MissionControllerImpl implements MissionController {
 						modelSpacecraft.setCode(restSpacecraft.getCode());
 						modelSpacecraft.setName(restSpacecraft.getName());
 						modelSpacecraft.setMission(modelMission);
+						
+						if (null != restSpacecraft.getPayloads()) {
+							for (RestPayload restPayload : restSpacecraft.getPayloads()) {
+								Payload modelPayload = new Payload();
+								modelPayload.setName(restPayload.getName());
+								modelPayload.setDescription(restPayload.getDescription());
+								modelSpacecraft.getPayloads().add(modelPayload);
+							}
+						}
+						
 						modelSpacecraft = RepositoryService.getSpacecraftRepository().save(modelSpacecraft);
 						newSpacecrafts.add(modelSpacecraft);
 						missionChanged = true;
@@ -397,25 +435,56 @@ public class MissionControllerImpl implements MissionController {
 				return MissionUtil.toRestMission(modelMission);
 			});
 		} catch (NoResultException e) {
-			logger.error(e.getMessage());
-			return new ResponseEntity<>(errorHeaders(e.getMessage()), HttpStatus.NOT_FOUND);
+			return new ResponseEntity<>(http.errorHeaders(e.getMessage()), HttpStatus.NOT_FOUND);
 		} catch (TransactionException e) {
-			logger.error(e.getMessage());
-			return new ResponseEntity<>(errorHeaders(e.getMessage()), HttpStatus.INTERNAL_SERVER_ERROR);
+			return new ResponseEntity<>(http.errorHeaders(e.getMessage()), HttpStatus.INTERNAL_SERVER_ERROR);
 		}
 
 		HttpStatus httpStatus = HttpStatus.OK;
 		if (mission.getVersion() == restMission.getVersion()) {
 			httpStatus = HttpStatus.NOT_MODIFIED;
-			logger.info(String.format(MSG_MISSION_NOT_MODIFIED, MSG_ID_MISSION_NOT_MODIFIED, id));
+			logger.log(OrderMgrMessage.MISSION_NOT_MODIFIED, id);
 		} else {
-			logger.info(String.format(MSG_MISSION_UPDATED, MSG_ID_MISSION_UPDATED, restMission.getCode()));
+			logger.log(OrderMgrMessage.MISSION_UPDATED, restMission.getCode());
 		}
 		
 		return new ResponseEntity<>(restMission, httpStatus);
 
 	}
 
+
+	/**
+	 * Update a spacecraft's list of payloads from the REST spacecraft's list of payloads
+	 * 
+	 * @param modelPayloads the spacecraft's list of payloads
+	 * @param restPayloads the REST spacecraft's list of payloads
+	 * @return true, if any of the payloads was changed, false otherwise
+	 */
+	private boolean updatePayloads(List<Payload> modelPayloads, @Valid List<RestPayload> restPayloads) {
+		if (logger.isTraceEnabled()) logger.trace(">>> updatePayloads({}, {})", modelPayloads, restPayloads);
+
+		boolean spacecraftChanged = false;
+		if (null == restPayloads) {
+			if (!modelPayloads.isEmpty()) {
+				spacecraftChanged = true;
+				modelPayloads.clear();
+			}
+		} else {
+			List<Payload> newPayloads = new ArrayList<>();
+			for (RestPayload restPayload : restPayloads) {
+				Payload modelPayload = new Payload();
+				modelPayload.setName(restPayload.getName());
+				modelPayload.setDescription(restPayload.getDescription());
+				newPayloads.add(modelPayload);
+			}
+			if (!modelPayloads.equals(newPayloads)) {
+				spacecraftChanged = true;
+				modelPayloads.clear();
+				modelPayloads.addAll(newPayloads);
+			}
+		}
+		return spacecraftChanged;
+	}
 
 	/**
 	 * Delete a mission by ID
@@ -440,13 +509,13 @@ public class MissionControllerImpl implements MissionController {
 				// Test whether the mission id is valid
 				Optional<de.dlr.proseo.model.Mission> modelMission = RepositoryService.getMissionRepository().findById(id);
 				if (modelMission.isEmpty()) {
-					throw new NoResultException(String.format(MSG_MISSION_NOT_FOUND, MSG_ID_MISSION_NOT_FOUND, id));
+					throw new NoResultException(logger.log(OrderMgrMessage.MISSION_NOT_FOUND, id));
 				}
 				Mission mission = modelMission.get();
 				
 				// Check execution options
 				if (deleteProducts && !force) {
-					throw new IllegalArgumentException(String.format(MSG_DELETE_PRODUCTS_WITHOUT_FORCE, MSG_ID_DELETE_PRODUCTS_WITHOUT_FORCE));
+					throw new IllegalArgumentException(logger.log(OrderMgrMessage.DELETE_PRODUCTS_WITHOUT_FORCE));
 				}
 				
 				// Do not delete missions with products without "deleteProducts"
@@ -457,7 +526,7 @@ public class MissionControllerImpl implements MissionController {
 					Object result = query.getSingleResult();
 					if (result instanceof Long) {
 						if (0 != ((Long) result)) {
-							throw new IllegalArgumentException(String.format(MSG_PRODUCTS_EXIST, MSG_ID_PRODUCTS_EXIST, mission.getCode()));
+							throw new IllegalArgumentException(logger.log(OrderMgrMessage.PRODUCTS_EXIST, mission.getCode()));
 						}
 					}
 				}
@@ -471,7 +540,7 @@ public class MissionControllerImpl implements MissionController {
 					Object result = query.getSingleResult();
 					if (result instanceof Long) {
 						if (0 != ((Long) result)) {
-							throw new IllegalArgumentException(String.format(MSG_PRODUCTCLASSES_EXIST, MSG_ID_PRODUCTCLASSES_EXIST, mission.getCode()));
+							throw new IllegalArgumentException(logger.log(OrderMgrMessage.PRODUCTCLASSES_EXIST, mission.getCode()));
 						}
 					}
 					// Check processor classes (processors, configurations etc. are configured with reference to processor classes)
@@ -481,7 +550,7 @@ public class MissionControllerImpl implements MissionController {
 					result = query.getSingleResult();
 					if (result instanceof Long) {
 						if (0 != ((Long) result)) {
-							throw new IllegalArgumentException(String.format(MSG_PROCESSORCLASSES_EXIST, MSG_ID_PROCESSORCLASSES_EXIST,  mission.getCode()));
+							throw new IllegalArgumentException(logger.log(OrderMgrMessage.PROCESSORCLASSES_EXIST,  mission.getCode()));
 						}
 					}
 				}
@@ -494,26 +563,23 @@ public class MissionControllerImpl implements MissionController {
 
 				// Test whether the deletion was successful
 				if (!RepositoryService.getMissionRepository().findById(id).isEmpty()) {
-					throw new RuntimeException(String.format(MSG_DELETION_UNSUCCESSFUL, MSG_ID_DELETION_UNSUCCESSFUL, id));
+					throw new RuntimeException(logger.log(OrderMgrMessage.MISSION_DELETION_UNSUCCESSFUL, id));
 				}
 
 				return null;
 			});
 		} catch (NoResultException e) {
-			logger.error(e.getMessage());
-			return new ResponseEntity<>(errorHeaders(e.getMessage()), HttpStatus.NOT_FOUND);
+			return new ResponseEntity<>(http.errorHeaders(e.getMessage()), HttpStatus.NOT_FOUND);
 		} catch (IllegalArgumentException e) {
-			logger.error(e.getMessage());
-			return new ResponseEntity<>(errorHeaders(e.getMessage()), HttpStatus.BAD_REQUEST);
+			return new ResponseEntity<>(http.errorHeaders(e.getMessage()), HttpStatus.BAD_REQUEST);
 		} catch (TransactionException e) {
-			logger.error(e.getMessage());
-			return new ResponseEntity<>(errorHeaders(e.getMessage()), HttpStatus.INTERNAL_SERVER_ERROR);
+			return new ResponseEntity<>(http.errorHeaders(e.getMessage()), HttpStatus.INTERNAL_SERVER_ERROR);
 		} catch (RuntimeException e) {
-			logger.error(e.getMessage(), e);
-			return new ResponseEntity<>(errorHeaders(e.getMessage()), HttpStatus.NOT_MODIFIED);
+			logger.log(GeneralMessage.RUNTIME_EXCEPTION_ENCOUNTERED, e);
+			return new ResponseEntity<>(http.errorHeaders(e.getMessage()), HttpStatus.NOT_MODIFIED);
 		}
 
-		logger.info(String.format(MSG_MISSION_DELETED, MSG_ID_MISSION_DELETED, id));
+		logger.log(OrderMgrMessage.MISSION_DELETED, id);
 		
 		HttpHeaders responseHeaders = new HttpHeaders();
 		return new ResponseEntity<>(responseHeaders, HttpStatus.NO_CONTENT);
@@ -542,6 +608,31 @@ public class MissionControllerImpl implements MissionController {
 		}
 		if (logger.isDebugEnabled()) logger.debug("... products deleted");
 		
+		// Delete the production history
+		jpqlQuery = "select mpph from MonProductProductionHour mpph where mpph.mission.id = " + missionId;
+		query = em.createQuery(jpqlQuery);
+		for (Object resultObject: query.getResultList()) {
+			if (resultObject instanceof MonProductProductionHour)
+				RepositoryService.getMonProductProductionHourRepository().deleteById(((MonProductProductionHour) resultObject).getId());
+		}
+		if (logger.isDebugEnabled()) logger.debug("... production history per hour deleted");
+		
+		jpqlQuery = "select mppd from MonProductProductionDay mppd where mppd.mission.id = " + missionId;
+		query = em.createQuery(jpqlQuery);
+		for (Object resultObject: query.getResultList()) {
+			if (resultObject instanceof MonProductProductionDay)
+				RepositoryService.getMonProductProductionDayRepository().deleteById(((MonProductProductionDay) resultObject).getId());
+		}
+		if (logger.isDebugEnabled()) logger.debug("... production history per day deleted");
+		
+		jpqlQuery = "select mppm from MonProductProductionMonth mppm where mppm.mission.id = " + missionId;
+		query = em.createQuery(jpqlQuery);
+		for (Object resultObject: query.getResultList()) {
+			if (resultObject instanceof MonProductProductionMonth)
+				RepositoryService.getMonProductProductionMonthRepository().deleteById(((MonProductProductionMonth) resultObject).getId());
+		}
+		if (logger.isDebugEnabled()) logger.debug("... production history per month deleted");
+		
 		// Delete all processing orders, jobs, job steps and product queries (by cascade)
 		jpqlQuery = "select po from ProcessingOrder po where po.mission.id = " + missionId;
 		query = em.createQuery(jpqlQuery);
@@ -551,6 +642,23 @@ public class MissionControllerImpl implements MissionController {
 		}
 		if (logger.isDebugEnabled()) logger.debug("... processing orders deleted");
 		
+		// Delete all configured processors and their connections to selection rules
+		jpqlQuery = "select cp from ConfiguredProcessor cp where cp.processor.processorClass.mission.id = " + missionId;
+		query = em.createQuery(jpqlQuery);
+		for (Object resultObject: query.getResultList()) {
+			if (resultObject instanceof ConfiguredProcessor) {
+				long configuredProcessorId = ((ConfiguredProcessor) resultObject).getId();
+				
+				String sqlQuery = "delete from simple_selection_rule_configured_processors " 
+						+ "where configured_processors_id = " + configuredProcessorId;
+				query = em.createNativeQuery(sqlQuery);
+				query.executeUpdate();
+
+				RepositoryService.getConfiguredProcessorRepository().deleteById(configuredProcessorId);
+			}
+		}
+		if (logger.isDebugEnabled()) logger.debug("... configured processors deleted");
+		
 		// Delete all product classes and selection rules (by cascade)
 		jpqlQuery = "select pc from ProductClass pc where pc.mission.id = " + missionId;
 		query = em.createQuery(jpqlQuery);
@@ -559,15 +667,6 @@ public class MissionControllerImpl implements MissionController {
 				RepositoryService.getProductClassRepository().deleteById(((ProductClass) resultObject).getId());
 		}
 		if (logger.isDebugEnabled()) logger.debug("... product classes deleted");
-		
-		// Delete all configured processors
-		jpqlQuery = "select cp from ConfiguredProcessor cp where cp.processor.processorClass.mission.id = " + missionId;
-		query = em.createQuery(jpqlQuery);
-		for (Object resultObject: query.getResultList()) {
-			if (resultObject instanceof ConfiguredProcessor)
-				RepositoryService.getConfiguredProcessorRepository().deleteById(((ConfiguredProcessor) resultObject).getId());
-		}
-		if (logger.isDebugEnabled()) logger.debug("... configured processors deleted");
 		
 		// Delete all processors and tasks (by cascade)
 		jpqlQuery = "select p from Processor p where p.processorClass.mission.id = " + missionId;

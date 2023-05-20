@@ -8,4 +8,5 @@ bin/
 .vscode
 **/*~
 **/.DS_Store
+/integration-tests
 .idea

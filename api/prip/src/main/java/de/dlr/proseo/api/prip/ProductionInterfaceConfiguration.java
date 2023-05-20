@@ -29,13 +29,13 @@ public class ProductionInterfaceConfiguration {
 	@Value("${proseo.ingestor.url}")
 	private String ingestorUrl;
 	
-	/** The URL of the prosEO Processor Manager */
-	@Value("${proseo.processorManager.url}")
-	private String processorManagerUrl;
+	/** Validity period for OAuth2 tokens */
+	@Value("${proseo.token.expiration}")
+	private Long tokenExpirationPeriod;
 	
-	/** The URL of some prosEO Facility Manager */
-	@Value("${proseo.facilityManager.url}")
-	private String facilityManagerUrl;
+	/** Maximum number of products to retrieve in a single query */
+	@Value("${proseo.quota}")
+	private Long quota;
 	
 	/**
 	 * Gets the URL of the prosEO User Manager component
@@ -56,21 +56,21 @@ public class ProductionInterfaceConfiguration {
 	}
 
 	/**
-	 * Gets the URL of the prosEO Processor Manager component
+	 * Gets the token validity period
 	 * 
-	 * @return the Processor Manager URL
+	 * @return the token expiration period
 	 */
-	public String getProcessorManagerUrl() {
-		return processorManagerUrl;
+	public Long getTokenExpirationPeriod() {
+		return tokenExpirationPeriod;
 	}
 
 	/**
-	 * Gets the URL of the prosEO Facility Manager component
+	 * Gets the maximum number of products to retrieve in a single query
 	 * 
-	 * @return the facilityManagerUrl
+	 * @return the quota
 	 */
-	public String getFacilityManagerUrl() {
-		return facilityManagerUrl;
+	public Long getQuota() {
+		return quota;
 	}
 
 }

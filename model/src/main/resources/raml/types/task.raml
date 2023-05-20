@@ -5,9 +5,11 @@
       id?:
         type: integer
         format: long
+        default: 0
         description: The persistent id of this object
       version?:
         type: integer
+        default: 1
         description: A version identifier to track updates to the object (especially to detect concurrent update attempts)
       missionCode?:
         type: string
@@ -38,6 +40,9 @@
       numberOfCpus?:
         type: integer
         description: The number of CPUs used by the task
+      minMemory?:
+        type: integer
+        description: Minimum memory (RAM) requirement for this task in GiB
       breakpointFileNames:
         type: string[]
         description: Intermediate output files for testing/evaluation purposes

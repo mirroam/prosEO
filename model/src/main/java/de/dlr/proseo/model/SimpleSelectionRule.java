@@ -35,9 +35,6 @@ import de.dlr.proseo.model.util.SelectionItem;
 @Entity
 public class SimpleSelectionRule extends PersistentObject {
 	
-	/** Default processing mode (representing any processing mode for the applicable mission) */
-	public static final String PROCESSING_MODE_ALWAYS = "ALWAYS";
-	
 	/* Error messages */
 	private static final String MSG_NO_ITEM_FOUND = "No item found or not enough time coverage for selection rule '%s' and time interval (%s, %s)";
 	private static final String MSG_INVALID_ITEM_TYPE = "Item with different item type found ";
@@ -45,16 +42,15 @@ public class SimpleSelectionRule extends PersistentObject {
 	
 	/**
 	 * Processing mode, for which this selection rule is valid (level 7 "Mode" from Generic IPF Interface Specifications, sec. 4.1.3);
-	 * this is restricted by the processing modes defined for the mission, but the (self evident and default) special value "ALWAYS"
-	 * is always valid.
+	 * the attribute is optional, its values are restricted by the processing modes defined for the mission.
 	 */
-	private String mode = PROCESSING_MODE_ALWAYS;
+	private String mode = null;
 	
 	/**
 	 * Indicates whether the required source product is mandatory for the production of the target product
 	 * (level 7 "Mandatory" from Generic IPF Interface Specifications, sec. 4.1.3)
 	 */
-	private Boolean isMandatory;
+	private Boolean isMandatory = true;
 	
 	/**
 	 * Minimum percentage of coverage of the desired validity period for fulfilment of this rule (default 0)
@@ -91,7 +87,7 @@ public class SimpleSelectionRule extends PersistentObject {
 
 	/** The set of processor configurations, for which this rule is applicable */
 	@ManyToMany
-	private Set<ConfiguredProcessor> applicableConfiguredProcessors = new HashSet<>();
+	private Set<ConfiguredProcessor> configuredProcessors = new HashSet<>();
 	
 	/**
 	 * Gets the applicable processing mode
@@ -245,19 +241,19 @@ public class SimpleSelectionRule extends PersistentObject {
 	/**
 	 * Gets the applicable processor configurations
 	 * 
-	 * @return the applicableConfiguredProcessors
+	 * @return the configuredProcessors
 	 */
-	public Set<ConfiguredProcessor> getApplicableConfiguredProcessors() {
-		return applicableConfiguredProcessors;
+	public Set<ConfiguredProcessor> getConfiguredProcessors() {
+		return configuredProcessors;
 	}
 
 	/**
 	 * Sets the applicable processor configurations
 	 * 
-	 * @param applicableConfiguredProcessors the applicableConfiguredProcessors to set
+	 * @param configuredProcessors the configuredProcessors to set
 	 */
-	public void setApplicableConfiguredProcessors(Set<ConfiguredProcessor> applicableConfiguredProcessors) {
-		this.applicableConfiguredProcessors = applicableConfiguredProcessors;
+	public void setConfiguredProcessors(Set<ConfiguredProcessor> configuredProcessors) {
+		this.configuredProcessors = configuredProcessors;
 	}
 
 	/**
@@ -399,7 +395,7 @@ public class SimpleSelectionRule extends PersistentObject {
 		}
 		
 		// Check required coverage
-		return minimumCoverage <= (residualDuration * 100) / initialDuration;
+		return minimumCoverage <= ((initialDuration - residualDuration) * 100) / initialDuration;
 	}
 	
 	/**
@@ -444,83 +440,42 @@ public class SimpleSelectionRule extends PersistentObject {
 	}
 	
 	/**
-	 * Format this rule as an OQL query
+	 * Format this rule as a JPQL (Java Persistence Query Language) query. The condition in the "where" clause
+	 * is set in parentheses, so further conditions/filters can be appended to the resulting query.
 	 * <p>
 	 * Limitation: For LatestValidityClosest the query may return two products, one to each side of the centre of the
 	 * given time interval. It is up to the calling program to select the applicable product.
 	 * 
 	 * @param startTime the start time to use in the database query
 	 * @param stopTime the stop time to use in the database query
-	 * @return an OQL string representing this rule
+	 * @param additionalFilterConditions filter conditions to apply in addition to the rule's own filters (optional)
+	 * @return a JPQL string representing this rule
 	 */
-	public String asPlQueryCondition(final Instant startTime, final Instant stopTime) {
-		// Generate query projection
-		StringBuilder simpleRuleQuery = new StringBuilder("select startTime, stopTime from ");
-		simpleRuleQuery.append(sourceProductClass.getProductType()).append(" where ");
-		
-		// Ensure canonical ordering of policies
-		simplePolicies.sort(new Comparator<SimplePolicy>() {
-			@Override
-			public int compare(SimplePolicy o1, SimplePolicy o2) {
-				return o1.getPolicyType().compareTo(o2.getPolicyType());
-			}});
-		
-		// Generate query condition
-		if (0 < filterConditions.size()) {
-			// Wrap everything in parentheses for later addition of filter conditions
-			simpleRuleQuery.append("(");
+	public String asJpqlQuery(final Instant startTime, final Instant stopTime, Map<String, Parameter> additionalFilterConditions) {
+		Map<String, Parameter> allFilterConditions = new HashMap<>(filterConditions);
+		if (null != additionalFilterConditions) {
+			allFilterConditions.putAll(additionalFilterConditions);
 		}
-		
-		// Format policies
-		if (1 < simplePolicies.size()) {
-			// Wrap multiple policies in parentheses
-			simpleRuleQuery.append("(");
-		}
-		boolean first = true;
-		for (SimplePolicy simplePolicy: simplePolicies) {
-			if (first)
-				first = false;
-			else
-				simpleRuleQuery.append(" or ");
-			simpleRuleQuery.append(simplePolicy.asPlQueryCondition(sourceProductClass.getProductType(), startTime, stopTime));
-		}
-		if (1 < simplePolicies.size()) {
-			// Close parentheses for multiple policies
-			simpleRuleQuery.append(")");
-		}
-		
-		// Format filter conditions
-		if (0 < filterConditions.size()) {
-			for (String filterKey: filterConditions.keySet()) {
-				simpleRuleQuery.append(String.format(" and %s = '%s'", filterKey, filterConditions.get(filterKey).getStringValue()));
-			}
-			// Close parentheses of query string with filter conditions
-			simpleRuleQuery.append(")");
-		}
-		return simpleRuleQuery.toString();
-	}
-	
-	
-	/**
-	 * Format this rule as an JPQL (Jave Persistence Query Language) query
-	 * <p>
-	 * Limitation: For LatestValidityClosest the query may return two products, one to each side of the centre of the
-	 * given time interval. It is up to the calling program to select the applicable product.
-	 * 
-	 * @param startTime the start time to use in the database query
-	 * @param stopTime the stop time to use in the database query
-	 * @return an OQL string representing this rule
-	 */
-	public String asJpqlQuery(final Instant startTime, final Instant stopTime) {
+
 		// Generate query projection
 		StringBuilder simpleRuleQuery = new StringBuilder("select p from Product p ");
 
 		// Join with as many instances of the product_parameters table as there are filter conditions
-		for (int i = 0; i < filterConditions.size(); ++i) {
-			simpleRuleQuery.append(String.format("join p.parameters pp%d ", i, i));
+		int i = 0;
+		for (String filterKey: allFilterConditions.keySet()) {
+			// Restrict to actual parameters
+			try {
+				Product.class.getDeclaredField(filterKey);
+				// Nothing to do – not a parameter, but a Product attribute
+			} catch (NoSuchFieldException e) {
+				simpleRuleQuery.append(String.format("join p.parameters pp%d ", i));
+				++i;
+			} catch (SecurityException e) {
+				throw new RuntimeException(String.format(MSG_CANNOT_CREATE_QUERY, e.getMessage()), e);
+			}
 		}
 		
-		simpleRuleQuery.append("where p.productClass.id = ").append(sourceProductClass.getId()).append(" and ");
+		simpleRuleQuery.append("where (p.productClass.id = ").append(sourceProductClass.getId()).append(" and ");
 		
 		// Ensure canonical ordering of policies
 		simplePolicies.sort(new Comparator<SimplePolicy>() {
@@ -542,7 +497,7 @@ public class SimpleSelectionRule extends PersistentObject {
 				first = false;
 			else
 				simpleRuleQuery.append(" or ");
-			simpleRuleQuery.append(simplePolicy.asJpqlQueryCondition(sourceProductClass, startTime, stopTime));
+			simpleRuleQuery.append(simplePolicy.asJpqlQueryCondition(sourceProductClass, startTime, stopTime, allFilterConditions));
 		}
 		if (1 < simplePolicies.size()) {
 			// Close parentheses for multiple policies
@@ -550,45 +505,70 @@ public class SimpleSelectionRule extends PersistentObject {
 		}
 		
 		// Format filter conditions
-		int i = 0;
-		for (String filterKey: filterConditions.keySet()) {
+		i = 0;
+		for (String filterKey: allFilterConditions.keySet()) {
 			// If the key points to a class attribute, query the attribute value, otherwise query a parameter with this key
 			try {
 				Product.class.getDeclaredField(filterKey);
 				simpleRuleQuery.append(
-						String.format(" and p.%s = '%s'", filterKey, filterConditions.get(filterKey).getStringValue()));
+						String.format(" and p.%s = '%s'", filterKey, allFilterConditions.get(filterKey).getStringValue()));
 			} catch (NoSuchFieldException e) {
 				simpleRuleQuery.append(String.format(" and key(pp%d) = '%s' and pp%d.parameterValue = '%s'", 
-						i, filterKey, i, filterConditions.get(filterKey).getStringValue()));
+						i, filterKey, i, allFilterConditions.get(filterKey).getStringValue()));
+				++i;
 			} catch (SecurityException e) {
 				throw new RuntimeException(String.format(MSG_CANNOT_CREATE_QUERY, e.getMessage()), e);
 			}
-			++i;
 		}
-		return simpleRuleQuery.toString();
+		return simpleRuleQuery.append(')').toString();
 	}
 	
 	/**
-	 * Format this rule as a native SQL query
+	 * Format this rule as a native SQL query. The condition in the "where" clause
+	 * is set in parentheses, so further conditions/filters can be appended to the resulting query.
 	 * <p>
 	 * Limitation: For LatestValidityClosest the query may return two products, one to each side of the centre of the
 	 * given time interval. It is up to the calling program to select the applicable product.
 	 * 
 	 * @param startTime the start time to use in the database query
 	 * @param stopTime the stop time to use in the database query
-	 * @return an OQL string representing this rule
+	 * @param additionalFilterConditions filter conditions to apply in addition to the rule's own filters (optional)
+	 * @param productColumnMapping a mapping from attribute names of the Product class to the corresponding SQL column names
+	 * @param facilityQuerySql an SQL selection string to add to the selection rule SQL query
+	 * @param facilityQuerySqlSubselect an SQL selection string to add to sub-SELECTs in selection policy SQL query conditions
+	 * @return an SQL string representing this rule
 	 */
-	public String asSqlQuery(final Instant startTime, final Instant stopTime) {
+	public String asSqlQuery(final Instant startTime, final Instant stopTime, Map<String, Parameter> additionalFilterConditions,
+			Map<String, String> productColumnMapping, String facilityQuerySql, String facilityQuerySqlSubselect) {
+		
+		Map<String, Parameter> allFilterConditions = new HashMap<>(filterConditions);
+		if (null != additionalFilterConditions) {
+			allFilterConditions.putAll(additionalFilterConditions);
+		}
+		if (null == facilityQuerySql) {
+			facilityQuerySql = "";
+		}
+
 		// Generate query projection
 		StringBuilder simpleRuleQuery = new StringBuilder("SELECT * FROM product p ");
 		
 		// Join with as many instances of the product_parameters table as there are filter conditions
-		for (int i = 0; i < filterConditions.size(); ++i) {
-			simpleRuleQuery.append(String.format("JOIN product_parameters pp%d ON p.id = pp%d.product_id ", i, i));
+		int i = 0;
+		for (String filterKey: allFilterConditions.keySet()) {
+			// Restrict to actual parameters
+			try {
+				Product.class.getDeclaredField(filterKey);
+				// Nothing to do – not a parameter, but a Product attribute
+			} catch (NoSuchFieldException e) {
+				simpleRuleQuery.append(String.format("JOIN product_parameters pp%d ON p.id = pp%d.product_id ", i, i));
+				++i;
+			} catch (SecurityException e) {
+				throw new RuntimeException(String.format(MSG_CANNOT_CREATE_QUERY, e.getMessage()), e);
+			}
 		}
 		
 		// Select correct product class		
-		simpleRuleQuery.append("WHERE p.product_class_id = ").append(sourceProductClass.getId()).append(" AND ");
+		simpleRuleQuery.append("WHERE (p.product_class_id = ").append(sourceProductClass.getId()).append(" AND ");
 		
 		// Ensure canonical ordering of policies
 		simplePolicies.sort(new Comparator<SimplePolicy>() {
@@ -610,7 +590,8 @@ public class SimpleSelectionRule extends PersistentObject {
 				first = false;
 			else
 				simpleRuleQuery.append(" OR ");
-			simpleRuleQuery.append(simplePolicy.asSqlQueryCondition(sourceProductClass, startTime, stopTime));
+			simpleRuleQuery.append(simplePolicy.asSqlQueryCondition(
+					sourceProductClass, startTime, stopTime, allFilterConditions, productColumnMapping, facilityQuerySqlSubselect));
 		}
 		if (1 < simplePolicies.size()) {
 			// Close parentheses for multiple policies
@@ -618,24 +599,22 @@ public class SimpleSelectionRule extends PersistentObject {
 		}
 		
 		// Format filter conditions
-		int i = 0;
-		for (String filterKey: filterConditions.keySet()) {
+		i = 0;
+		for (String filterKey: allFilterConditions.keySet()) {
 			// If the key points to a class attribute, query the attribute value, otherwise query a parameter with this key
-			try {
-				Product.class.getDeclaredField(filterKey);
-				simpleRuleQuery.append(
-						String.format(" AND p.%s = '%s'", filterKey, filterConditions.get(filterKey).getStringValue()));
-			} catch (NoSuchFieldException e) {
+			String columnName = productColumnMapping.get(filterKey);
+			if (null == columnName) {
 				simpleRuleQuery.append(
 						String.format(" AND pp%d.parameters_key = '%s' AND pp%d.parameter_value = '%s'", 
-								i, filterKey, i, filterConditions.get(filterKey).getStringValue()));
-			} catch (SecurityException e) {
-				throw new RuntimeException(String.format(MSG_CANNOT_CREATE_QUERY, e.getMessage()), e);
+								i, filterKey, i, allFilterConditions.get(filterKey).getStringValue()));
+				++i;
+			} else {
+				simpleRuleQuery.append(
+						String.format(" AND p.%s = '%s'", columnName, allFilterConditions.get(filterKey).getStringValue()));
 			}
-			++i;
 		}
 
-		return simpleRuleQuery.toString();
+		return simpleRuleQuery.append(facilityQuerySql).append(')').toString();
 	}
 	
 	/* (non-Javadoc)
@@ -685,16 +664,20 @@ public class SimpleSelectionRule extends PersistentObject {
 	 */
 	@Override
 	public boolean equals(Object obj) {
+		// Object identity
 		if (this == obj)
 			return true;
-		if (!super.equals(obj))
-			return false;
+		
+		// Same database object
+		if (super.equals(obj))
+			return true;
+		
 		if (!(obj instanceof SimpleSelectionRule))
 			return false;
 		SimpleSelectionRule other = (SimpleSelectionRule) obj;
-		return Objects.equals(sourceProductClass, other.sourceProductClass)
-				&& Objects.equals(targetProductClass, other.targetProductClass)
-				&& Objects.equals(mode, other.mode);
+		return Objects.equals(sourceProductClass, other.getSourceProductClass())
+				&& Objects.equals(targetProductClass, other.getTargetProductClass())
+				&& Objects.equals(mode, other.getMode());
 	}
 
 }

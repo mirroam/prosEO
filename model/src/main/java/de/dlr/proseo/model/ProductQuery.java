@@ -15,10 +15,13 @@ import java.util.Set;
 import javax.persistence.Column;
 import javax.persistence.ElementCollection;
 import javax.persistence.Entity;
+import javax.persistence.FetchType;
 import javax.persistence.Index;
 import javax.persistence.ManyToMany;
 import javax.persistence.ManyToOne;
 import javax.persistence.Table;
+import javax.persistence.Transient;
+
 
 /**
  * A ProductQuery models the need of a JobStep to use a Product of a certain ProductClass for a specific time period.
@@ -33,24 +36,24 @@ import javax.persistence.Table;
 		@Index(unique = true, columnList = "job_step_id, requested_product_class_id"), 
 		@Index(columnList = "requested_product_class_id") } )
 public class ProductQuery extends PersistentObject {
-
+	
 	/* Static message strings */
 	private static final String MSG_CANNOT_ACCESS_PRODUCT_FIELD = "Cannot access product field %s (cause: %s)";
 
 	/** Job step issuing this query */
-	@ManyToOne
+	@ManyToOne(fetch = FetchType.LAZY)
 	private JobStep jobStep;
 	
 	/**
 	 * The selection rule, from which this query was derived
 	 */
-	@ManyToOne
+	@ManyToOne(fetch = FetchType.LAZY)
 	private SimpleSelectionRule generatingRule;
 	
 	/**
 	 * The product class requested by the selection rule
 	 */
-	@ManyToOne
+	@ManyToOne(fetch = FetchType.LAZY)
 	private ProductClass requestedProductClass;
 	
 	/**
@@ -88,24 +91,39 @@ public class ProductQuery extends PersistentObject {
 	private Set<Product> satisfyingProducts = new HashSet<>();
 
 	/**
+	 * The hashCode() method is often called (during add to a HashSet) and the calculation needs a lot of effort.
+	 * Thus the hash code is cached and only new calculated after calling a setter method.
+	 */
+	@Transient
+	private int hashCache = 0;
+
+	/**
 	 * Create a product query from a simple selection rule for a given job step
 	 * 
 	 * @param selectionRule the selection rule to create the product query from
 	 * @param jobStep the job step to generate the product query for
+	 * @param productColumnMapping a mapping from attribute names of the Product class to the corresponding SQL column names
+	 * @param facilityQuerySql an SQL selection string to add to the selection rule SQL query
+	 * @param facilityQuerySqlSubselect an SQL selection string to add to sub-SELECTs in selection policy SQL query conditions
 	 * @return a product query object
 	 */
-	public static ProductQuery fromSimpleSelectionRule(SimpleSelectionRule selectionRule, JobStep jobStep) {
+	public static ProductQuery fromSimpleSelectionRule(SimpleSelectionRule selectionRule, JobStep jobStep,
+			Map<String, String> productColumnMapping, String facilityQuerySql, String facilityQuerySqlSubselect) {
+		
 		ProductQuery productQuery = new ProductQuery();
 		productQuery.generatingRule = selectionRule;
 		productQuery.jobStep = jobStep;
 		productQuery.requestedProductClass = selectionRule.getSourceProductClass();
-		productQuery.jpqlQueryCondition = selectionRule.asJpqlQuery(jobStep.getJob().getStartTime(), jobStep.getJob().getStopTime());
-		productQuery.sqlQueryCondition = selectionRule.asSqlQuery(jobStep.getJob().getStartTime(), jobStep.getJob().getStopTime());
 		InputFilter inputFilter = jobStep.getJob().getProcessingOrder().getInputFilters().get(selectionRule.getSourceProductClass());
 		if (null != inputFilter) {
 			productQuery.filterConditions.putAll(inputFilter.getFilterConditions());
 		}
-		
+		productQuery.jpqlQueryCondition = selectionRule.asJpqlQuery(
+				jobStep.getJob().getStartTime(), jobStep.getJob().getStopTime(), productQuery.filterConditions);
+		productQuery.sqlQueryCondition = selectionRule.asSqlQuery(
+				jobStep.getJob().getStartTime(), jobStep.getJob().getStopTime(), productQuery.filterConditions,
+				productColumnMapping, facilityQuerySql, facilityQuerySqlSubselect);
+		productQuery.calcHash();
 		return productQuery;
 	}
 	
@@ -125,6 +143,7 @@ public class ProductQuery extends PersistentObject {
 	 */
 	public void setJobStep(JobStep jobStep) {
 		this.jobStep = jobStep;
+		calcHash();
 	}
 
 	/**
@@ -143,6 +162,7 @@ public class ProductQuery extends PersistentObject {
 	 */
 	public void setGeneratingRule(SimpleSelectionRule generatingRule) {
 		this.generatingRule = generatingRule;
+		calcHash();
 	}
 
 	/**
@@ -161,6 +181,7 @@ public class ProductQuery extends PersistentObject {
 	 */
 	public void setRequestedProductClass(ProductClass requestedProductClass) {
 		this.requestedProductClass = requestedProductClass;
+		calcHash();
 	}
 
 	/**
@@ -179,6 +200,7 @@ public class ProductQuery extends PersistentObject {
 	 */
 	public void setJpqlQueryCondition(String jpqlQueryCondition) {
 		this.jpqlQueryCondition = jpqlQueryCondition;
+		calcHash();
 	}
 
 	/**
@@ -197,6 +219,7 @@ public class ProductQuery extends PersistentObject {
 	 */
 	public void setSqlQueryCondition(String sqlQueryCondition) {
 		this.sqlQueryCondition = sqlQueryCondition;
+		calcHash();
 	}
 
 	/**
@@ -215,6 +238,7 @@ public class ProductQuery extends PersistentObject {
 	 */
 	public void setFilterConditions(Map<String, Parameter> filterConditions) {
 		this.filterConditions = filterConditions;
+		calcHash();
 	}
 
 	/**
@@ -233,6 +257,7 @@ public class ProductQuery extends PersistentObject {
 	 */
 	public void setMinimumCoverage(Short minimumCoverage) {
 		this.minimumCoverage = minimumCoverage;
+		calcHash();
 	}
 
 	/**
@@ -260,6 +285,7 @@ public class ProductQuery extends PersistentObject {
 	 */
 	public void setIsSatisfied(Boolean isSatisfied) {
 		this.isSatisfied = isSatisfied;
+		calcHash();
 	}
 
 	/**
@@ -316,6 +342,7 @@ public class ProductQuery extends PersistentObject {
 	 */
 	public void setSatisfyingProducts(Set<Product> satisfyingProducts) {
 		this.satisfyingProducts = satisfyingProducts;
+		calcHash();
 	}
 	
 	/**
@@ -350,24 +377,36 @@ public class ProductQuery extends PersistentObject {
 		return success;
 	}
 	
+	/**
+	 * Calculate the hashCode and store it in the hashCache
+	 */
+	private void calcHash() {
+		hashCache = Objects.hash(jobStep, requestedProductClass);
+	}
+
 	@Override
 	public int hashCode() {
-		final int prime = 31;
-		int result = super.hashCode();
-		result = prime * result + Objects.hash(jobStep, requestedProductClass);
-		return result;
+		if (hashCache == 0) {
+			// this is usually called after the object is read from DB.
+			calcHash();
+		}
+		return hashCache;
 	}
 
 	@Override
 	public boolean equals(Object obj) {
+		// Object identity
 		if (this == obj)
 			return true;
-		if (!super.equals(obj))
-			return false;
+		
+		// Same database object
+		if (super.equals(obj))
+			return true;
+		
 		if (!(obj instanceof ProductQuery))
 			return false;
 		ProductQuery other = (ProductQuery) obj;
-		return Objects.equals(jobStep, other.jobStep) && Objects.equals(requestedProductClass, other.requestedProductClass);
+		return Objects.equals(jobStep, other.getJobStep()) && Objects.equals(requestedProductClass, other.getRequestedProductClass());
 	}
 
 	@Override

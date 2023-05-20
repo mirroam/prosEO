@@ -6,19 +6,24 @@
 
 package de.dlr.proseo.ui.cli;
 
-import static de.dlr.proseo.ui.backend.UIMessages.*;
-
+import java.io.BufferedReader;
+import java.io.FileInputStream;
 import java.io.FileNotFoundException;
+import java.io.FileReader;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.attribute.PosixFileAttributeView;
+import java.nio.file.attribute.PosixFilePermission;
 import java.text.ParseException;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Set;
 
 import org.jline.reader.EndOfFileException;
 import org.jline.reader.LineReader;
 import org.jline.reader.LineReaderBuilder;
 import org.jline.reader.UserInterruptException;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.Banner;
 import org.springframework.boot.CommandLineRunner;
@@ -29,8 +34,12 @@ import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.Configuration;
 import org.yaml.snakeyaml.error.YAMLException;
 
+import de.dlr.proseo.logging.logger.ProseoLogger;
+import de.dlr.proseo.logging.messages.GeneralMessage;
+import de.dlr.proseo.logging.messages.UIMessage;
 import de.dlr.proseo.model.enums.UserRole;
 import de.dlr.proseo.ui.backend.LoginManager;
+import de.dlr.proseo.ui.cli.CLIUtil.Credentials;
 import de.dlr.proseo.ui.cli.parser.CLIParser;
 import de.dlr.proseo.ui.cli.parser.ParsedCommand;
 import de.dlr.proseo.ui.cli.parser.ParsedOption;
@@ -95,41 +104,33 @@ public class CommandLineInterface implements CommandLineRunner {
 	public static boolean isInteractiveMode = true;
 	
 	/** A logger for this class */
-	private static Logger logger = LoggerFactory.getLogger(CommandLineInterface.class);
+	private static ProseoLogger logger = new ProseoLogger(CommandLineInterface.class);
 	
 	/**
-	 * Check the program invocation arguments (-u/--user, -p/--password, -m/--mission) and remove them from the command line
+	 * Check the program invocation arguments (-i/--identFile, -m/--mission) and remove them from the command line
 	 * 
 	 * @param args the program invocation arguments
 	 * @return a list of strings containing:
 	 *   <ol>
 	 *     <li>the prosEO command after removal of the invocation arguments</li>
-	 *     <li>the username</li>
-	 *     <li>the user's password</li>
-	 *     <li>the mission to execute the command for</li>
+	 *     <li>the path to the ident file, if given</li>
+	 *     <li>the mission to execute the command for, if given</li>
 	 *  </ol>
 	 */
 	private static List<String> checkArguments(String[] args) {
 		if (logger.isTraceEnabled()) logger.trace(">>> checkArguments({})", Arrays.toString(args));
 		
 		StringBuilder commandBuilder = new StringBuilder();
-		String username = null;
-		String password = null;
+		String identFile = null;
 		String mission = null;
 		
 		for (String arg: args) {
-			if (arg.startsWith("-u")) {
-				// Short form user argument
-				username = arg.substring(2);
-			} else if (arg.startsWith("--user=")) {
-				// Long form user argument
-				username = arg.substring(7);
-			} else if (arg.startsWith("-p")) {
-				// Short form password argument
-				password = arg.substring(2);
-			} else if (arg.startsWith("--password=")) {
-				// Long form password argument
-				password = arg.substring(11);
+			if (arg.startsWith("-i")) {
+				// Short form ident file argument
+				identFile = arg.substring(2);
+			} else if (arg.startsWith("--identFile=")) {
+				// Long form ident file argument
+				identFile = arg.substring(12);
 			} else if (arg.startsWith("-m")) {
 				// Short form mission argument
 				mission = arg.substring(2);
@@ -142,7 +143,7 @@ public class CommandLineInterface implements CommandLineRunner {
 			}
 		}
 		
-		return Arrays.asList(commandBuilder.toString(), username, password, mission);
+		return Arrays.asList(commandBuilder.toString(), identFile, mission);
 	}
 	
 	/**
@@ -156,7 +157,7 @@ public class CommandLineInterface implements CommandLineRunner {
 		
 		// Check argument
 		if (null == command) {
-			throw new NullPointerException(uiMsg(MSG_ID_COMMAND_NAME_NULL));
+			throw new NullPointerException(ProseoLogger.format(UIMessage.COMMAND_NAME_NULL));
 		}
 		
 		// If help is requested, show help and skip execution
@@ -182,16 +183,23 @@ public class CommandLineInterface implements CommandLineRunner {
 			case CMD_LOGIN:
 				String username = null, password = null, mission = null;
 				for (ParsedOption option: command.getOptions()) {
-					if ("user".equals(option.getName())) username = option.getValue();
-					if ("password".equals(option.getName())) password = option.getValue();
+					if ("identFile".equals(option.getName())) {
+						try {
+							Credentials credentials = CLIUtil.readIdentFile(option.getValue());
+							username = credentials.username;
+							password = credentials.password;
+						} catch (Exception e) {
+							System.err.println(ProseoLogger.format(UIMessage.USER_NOT_LOGGED_IN));
+							break;
+						}
+					}
 				}
 				if (0 < command.getParameters().size()) {
 					mission = command.getParameters().get(0).getValue();
 				}
 				boolean loggedIn = loginManager.doLogin(username, password, mission, true);
 				if (loggedIn && !loginManager.hasRole(UserRole.CLI_USER)) {
-					String message = uiMsg(MSG_ID_CLI_NOT_AUTHORIZED, loginManager.getUser());
-					logger.error(message);
+					String message = logger.log(UIMessage.CLI_NOT_AUTHORIZED, loginManager.getUser());
 					System.err.println(message);
 					loginManager.doLogout();
 				}
@@ -204,7 +212,7 @@ public class CommandLineInterface implements CommandLineRunner {
 				break;
 			case CMD_CLEAR:
 				if (System.getProperty("os.name").toLowerCase().contains("windows")) {
-					Runtime.getRuntime().exec("cls");
+					new ProcessBuilder("cmd", "/c", "cls").inheritIO().start().waitFor();
 				} else {
 					System.out.print(CLEAR_SCREEN_SEQUENCE);
 				}
@@ -231,6 +239,7 @@ public class CommandLineInterface implements CommandLineRunner {
 				productclassCommandRunner.executeCommand(command);
 				break;
 			case UserCommandRunner.CMD_USER:
+			case UserCommandRunner.CMD_PASSWORD:
 			case UserCommandRunner.CMD_GROUP:
 				userCommandRunner.executeCommand(command);
 				break;
@@ -238,7 +247,7 @@ public class CommandLineInterface implements CommandLineRunner {
 				facilityCommandRunner.executeCommand(command);
 				break;
 			default:
-				String message = uiMsg(MSG_ID_NOT_IMPLEMENTED, command.getName());
+				String message = ProseoLogger.format(UIMessage.COMMAND_NOT_IMPLEMENTED, command.getName());
 				System.err.println(message);
 				break;
 			}
@@ -255,16 +264,16 @@ public class CommandLineInterface implements CommandLineRunner {
 	 */
 	@Override
 	public void run(String... args) throws Exception {
-		if (logger.isTraceEnabled()) logger.trace(">>> run({})", (Object[]) args);
+		if (logger.isTraceEnabled()) logger.trace(">>> run({})", args.toString());
 		
 		// Initialize the CLI
 		try {
 			parser.loadSyntax();
 		} catch (FileNotFoundException e) {
-			logger.error(uiMsg(MSG_ID_SYNTAX_FILE_NOT_FOUND, config.getCliSyntaxFile()));
+			logger.log(UIMessage.SYNTAX_FILE_NOT_FOUND, config.getCliSyntaxFile());
 			throw e;
 		} catch (YAMLException e) {
-			logger.error(uiMsg(MSG_ID_SYNTAX_FILE_ERROR, config.getCliSyntaxFile(), e.getMessage()));
+			logger.log(UIMessage.SYNTAX_FILE_ERROR, config.getCliSyntaxFile(), e.getMessage());
 			throw e;
 		}
 		
@@ -274,23 +283,35 @@ public class CommandLineInterface implements CommandLineRunner {
 			List<String> proseoCommand = checkArguments(args);
 			
 			// Log in to prosEO, if a username was given
-			String username = proseoCommand.get(1);
-			String password = proseoCommand.get(2);
-			String mission = proseoCommand.get(3);
+			String identFile = proseoCommand.get(1);
+			String mission = proseoCommand.get(2);
+			String username = null, password = null;
+			if (null != identFile) {
+				try {
+					Credentials credentials = CLIUtil.readIdentFile(identFile);
+					username = credentials.username;
+					password = credentials.password;
+				} catch (SecurityException | IOException e) {
+					System.err.println(ProseoLogger.format(UIMessage.USER_NOT_LOGGED_IN));
+				} catch (Exception e) {
+					String message = logger.log(UIMessage.EXCEPTION, e);
+					System.err.println(message);
+					System.err.println(ProseoLogger.format(UIMessage.USER_NOT_LOGGED_IN));
+				}
+			}
 			if (null != username) {
 				if (null == password || password.isBlank()) {
-					String message = uiMsg(MSG_ID_PASSWORD_MISSING, username);
-					logger.error(message);
+					String message = logger.log(UIMessage.PASSWORD_MISSING, username);
 					System.err.println(message);
 					return;
 				}
+				System.out.println(ProseoLogger.format(UIMessage.LOGGING_IN, username));
 				if (!loginManager.doLogin(username, password, mission, isInteractiveMode)) {
 					// Already logged
 					return;
 				}
 				if (!loginManager.hasRole(UserRole.CLI_USER)) {
-					String message = uiMsg(MSG_ID_CLI_NOT_AUTHORIZED, username);
-					logger.error(message);
+					String message = logger.log(UIMessage.CLI_NOT_AUTHORIZED, username);
 					System.err.println(message);
 					return;
 				}
@@ -314,7 +335,7 @@ public class CommandLineInterface implements CommandLineRunner {
 		
 		// Check whether the command line prompt shall be started (only required for unit tests)
 		if (!config.getCliStart()) {
-			logger.info(uiMsg(MSG_ID_COMMAND_LINE_PROMPT_SUPPRESSED));
+			logger.log(UIMessage.COMMAND_LINE_PROMPT_SUPPRESSED);
 			if (logger.isTraceEnabled()) logger.trace("<<< run()");
 			return;
 		}
@@ -330,13 +351,12 @@ public class CommandLineInterface implements CommandLineRunner {
 						String.format(PROSEO_COMMAND_PROMPT, null == loginManager.getMission() ? "no mission" : loginManager.getMission())
 						: "");
 				} catch (UserInterruptException e) {
-					String message = uiMsg(MSG_ID_USER_INTERRUPT);
-					logger.error(message);
+					String message = logger.log(UIMessage.USER_INTERRUPT);
 					System.err.println(message);
 					break;
 				} catch (EndOfFileException e) {
 					// End of file reached for redirected input
-					logger.info(uiMsg(MSG_ID_END_OF_FILE));
+					logger.log(UIMessage.END_OF_FILE);
 					// No logging to standard output
 					break;
 				}
@@ -352,7 +372,7 @@ public class CommandLineInterface implements CommandLineRunner {
 			if (logger.isTraceEnabled()) logger.trace("... received command '{}'", (null == command ? "null" : command.getName()));
 			if (CMD_EXIT.equals(command.getName()) && !command.isHelpRequested()) {
 				// Terminate CLI execution
-				logger.info(uiMsg(MSG_ID_CLI_TERMINATED));
+				logger.log(UIMessage.CLI_TERMINATED);
 				// No logging to standard output
 				break;
 			}
@@ -382,8 +402,7 @@ public class CommandLineInterface implements CommandLineRunner {
 			cli.run(args);
 			System.exit(0);
 		} catch (Exception e) {
-			String message = uiMsg(MSG_ID_UNCAUGHT_EXCEPTION, e.getMessage());
-			logger.error(message, e);
+			String message = logger.log(UIMessage.UNCAUGHT_EXCEPTION, e);
 			System.err.println(message);
 			System.exit(1);
 		}

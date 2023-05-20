@@ -1,14 +1,14 @@
 package de.dlr.proseo.facmgr.rest.model;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import de.dlr.proseo.logging.logger.ProseoLogger;
 import de.dlr.proseo.model.ProcessingFacility;
+import de.dlr.proseo.model.enums.FacilityState;
 import de.dlr.proseo.model.enums.StorageType;
 
 
 public class FacmgrUtil {
 	/** A logger for this class */
-	private static Logger logger = LoggerFactory.getLogger(FacmgrUtil.class);
+	private static ProseoLogger logger = new ProseoLogger(FacmgrUtil.class);
 	
 	/**
 	 * Convert a prosEO model ProcessingFacility into a REST Facility
@@ -16,7 +16,7 @@ public class FacmgrUtil {
 	 * @param modelFacility the prosEO model ProcessingFacility
 	 * @return an equivalent REST processingFacility or null, if no model ProcessingFacility was given
 	 */
-
+	
 	public static RestProcessingFacility toRestFacility(ProcessingFacility modelFacility) {
 		if (logger.isTraceEnabled()) logger.trace(">>> toRestFacility({})", (null == modelFacility ? "MISSING" : modelFacility.getId()));
 		
@@ -36,20 +36,28 @@ public class FacmgrUtil {
 			restFacility.setDescription(modelFacility.getDescription());
 
 		}	
+		if (null != modelFacility.getFacilityState()) {
+			restFacility.setFacilityState(modelFacility.getFacilityState().toString());
+
+		}
 		if (null != modelFacility.getProcessingEngineUrl()) {
 			restFacility.setProcessingEngineUrl(modelFacility.getProcessingEngineUrl());
 
 		}	
-		if (null != modelFacility.getProcessingEngineUser()) {
-			restFacility.setProcessingEngineUser(modelFacility.getProcessingEngineUser());
+		if (null != modelFacility.getProcessingEngineToken()) {
+			restFacility.setProcessingEngineToken(modelFacility.getProcessingEngineToken());
 
 		}
-		if (null != modelFacility.getProcessingEnginePassword()) {
-			restFacility.setProcessingEnginePassword(modelFacility.getProcessingEnginePassword());
+		if (null != modelFacility.getMaxJobsPerNode()) {
+			restFacility.setMaxJobsPerNode(modelFacility.getMaxJobsPerNode().longValue());
 
-		}
+		}	
 		if (null != modelFacility.getStorageManagerUrl()) {
 			restFacility.setStorageManagerUrl(modelFacility.getStorageManagerUrl());
+
+		}	
+		if (null != modelFacility.getExternalStorageManagerUrl()) {
+			restFacility.setExternalStorageManagerUrl(modelFacility.getExternalStorageManagerUrl());
 
 		}	
 		if (null != modelFacility.getLocalStorageManagerUrl()) {
@@ -103,20 +111,28 @@ public class FacmgrUtil {
 			modelFacility.setDescription(restFacility.getDescription());
 
 		}	
+		if (null != restFacility.getFacilityState()) {
+			modelFacility.setFacilityState(FacilityState.valueOf(restFacility.getFacilityState()));
+
+		}	
 		if (null != restFacility.getProcessingEngineUrl()) {
 			modelFacility.setProcessingEngineUrl(restFacility.getProcessingEngineUrl());
 
 		}	
-		if (null != restFacility.getProcessingEngineUser()) {
-			modelFacility.setProcessingEngineUser(restFacility.getProcessingEngineUser());
+		if (null != restFacility.getProcessingEngineToken()) {
+			modelFacility.setProcessingEngineToken(restFacility.getProcessingEngineToken());
 
 		}	
-		if (null != restFacility.getProcessingEnginePassword()) {
-			modelFacility.setProcessingEnginePassword(restFacility.getProcessingEnginePassword());
+		if (null != restFacility.getMaxJobsPerNode()) {
+			modelFacility.setMaxJobsPerNode(restFacility.getMaxJobsPerNode().intValue());
 
 		}	
 		if (null != restFacility.getStorageManagerUrl()) {
 			modelFacility.setStorageManagerUrl(restFacility.getStorageManagerUrl());
+
+		}	
+		if (null != restFacility.getExternalStorageManagerUrl()) {
+			modelFacility.setExternalStorageManagerUrl(restFacility.getExternalStorageManagerUrl());
 
 		}	
 		if (null != restFacility.getLocalStorageManagerUrl()) {

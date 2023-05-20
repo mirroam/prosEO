@@ -12,14 +12,15 @@ import javax.persistence.EntityNotFoundException;
 import javax.persistence.NoResultException;
 import javax.validation.Valid;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
 
+import de.dlr.proseo.logging.http.HttpPrefix;
+import de.dlr.proseo.logging.http.ProseoHttp;
+import de.dlr.proseo.logging.logger.ProseoLogger;
 import de.dlr.proseo.usermgr.rest.model.RestGroup;
 import de.dlr.proseo.usermgr.rest.model.RestUser;
 
@@ -31,28 +32,13 @@ import de.dlr.proseo.usermgr.rest.model.RestUser;
 @Component
 public class GroupControllerImpl implements GroupController {
 
-	/* Message string constants */
-	private static final String HTTP_HEADER_WARNING = "Warning";
-	private static final String HTTP_MSG_PREFIX = "199 proseo-user-mgr ";
-
 	/** The user manager */
 	@Autowired
 	private GroupManager groupManager;
 
 	/** A logger for this class */
-	private static Logger logger = LoggerFactory.getLogger(GroupControllerImpl.class);
-
-	/**
-	 * Create an HTTP "Warning" header with the given text message
-	 * 
-	 * @param message the message text
-	 * @return an HttpHeaders object with a warning message
-	 */
-	private HttpHeaders errorHeaders(String message) {
-		HttpHeaders responseHeaders = new HttpHeaders();
-		responseHeaders.set(HTTP_HEADER_WARNING, HTTP_MSG_PREFIX + message.replaceAll("\n", " "));
-		return responseHeaders;
-	}
+	private static ProseoLogger logger = new ProseoLogger(GroupControllerImpl.class);
+	private static ProseoHttp http = new ProseoHttp(logger, HttpPrefix.USER_MGR);
 	
 	/**
 	 * Get user groups by mission
@@ -69,7 +55,7 @@ public class GroupControllerImpl implements GroupController {
 		try {
 			return new ResponseEntity<>(groupManager.getGroups(mission, groupName), HttpStatus.OK);
 		} catch (NoResultException e) {
-			return new ResponseEntity<>(errorHeaders(e.getMessage()), HttpStatus.NOT_FOUND);
+			return new ResponseEntity<>(http.errorHeaders(e.getMessage()), HttpStatus.NOT_FOUND);
 		}
 	}
 
@@ -88,7 +74,7 @@ public class GroupControllerImpl implements GroupController {
 		try {
 			return new ResponseEntity<>(groupManager.createGroup(restGroup), HttpStatus.CREATED);
 		} catch (IllegalArgumentException e) {
-			return new ResponseEntity<>(errorHeaders(e.getMessage()), HttpStatus.BAD_REQUEST);
+			return new ResponseEntity<>(http.errorHeaders(e.getMessage()), HttpStatus.BAD_REQUEST);
 		}
 	}
 
@@ -107,9 +93,9 @@ public class GroupControllerImpl implements GroupController {
 		try {
 			return new ResponseEntity<>(groupManager.getGroupById(id), HttpStatus.OK);
 		} catch (NoResultException e) {
-			return new ResponseEntity<>(errorHeaders(e.getMessage()), HttpStatus.NOT_FOUND);
+			return new ResponseEntity<>(http.errorHeaders(e.getMessage()), HttpStatus.NOT_FOUND);
 		} catch (IllegalArgumentException e) {
-			return new ResponseEntity<>(errorHeaders(e.getMessage()), HttpStatus.BAD_REQUEST);
+			return new ResponseEntity<>(http.errorHeaders(e.getMessage()), HttpStatus.BAD_REQUEST);
 		}
 	}
 
@@ -129,9 +115,9 @@ public class GroupControllerImpl implements GroupController {
 			groupManager.deleteGroupById(id);
 			return new ResponseEntity<>(new HttpHeaders(), HttpStatus.NO_CONTENT);
 		} catch (EntityNotFoundException e) {
-			return new ResponseEntity<>(errorHeaders(e.getMessage()), HttpStatus.NOT_FOUND);
+			return new ResponseEntity<>(http.errorHeaders(e.getMessage()), HttpStatus.NOT_FOUND);
 		} catch (RuntimeException e) {
-			return new ResponseEntity<>(errorHeaders(e.getMessage()), HttpStatus.NOT_MODIFIED);
+			return new ResponseEntity<>(http.errorHeaders(e.getMessage()), HttpStatus.NOT_MODIFIED);
 		}
 	}
 
@@ -141,6 +127,7 @@ public class GroupControllerImpl implements GroupController {
 	 * @param id the ID of the group to update
 	 * @param restGroup a Json object containing the modified (and unmodified) attributes
 	 * @return HTTP status "OK" and a response containing a Json object corresponding to the user after modification or 
+	 *         HTTP status "NOT_MODIFIED" and a warning message, if the input date was the same as the database data, or
 	 * 		   HTTP status "NOT_FOUND" and an error message, if no user group with the given ID exists, or
 	 *         HTTP status "BAD_REQUEST" and an error message, if any of the input data was invalid, or
 	 *         HTTP status "CONFLICT" and an error message, if the user has been modified since retrieval by the client
@@ -151,12 +138,14 @@ public class GroupControllerImpl implements GroupController {
 		
 		try {
 			return new ResponseEntity<>(groupManager.modifyGroup(id, restGroup), HttpStatus.OK);
+		} catch (GroupManager.NotModifiedException e) {
+			return new ResponseEntity<>(http.errorHeaders(e.getMessage()), HttpStatus.NOT_MODIFIED);
 		} catch (EntityNotFoundException e) {
-			return new ResponseEntity<>(errorHeaders(e.getMessage()), HttpStatus.NOT_FOUND);
+			return new ResponseEntity<>(http.errorHeaders(e.getMessage()), HttpStatus.NOT_FOUND);
 		} catch (IllegalArgumentException e) {
-			return new ResponseEntity<>(errorHeaders(e.getMessage()), HttpStatus.BAD_REQUEST);
+			return new ResponseEntity<>(http.errorHeaders(e.getMessage()), HttpStatus.BAD_REQUEST);
 		} catch (ConcurrentModificationException e) {
-			return new ResponseEntity<>(errorHeaders(e.getMessage()), HttpStatus.CONFLICT);
+			return new ResponseEntity<>(http.errorHeaders(e.getMessage()), HttpStatus.CONFLICT);
 		}
 	}
 
@@ -174,7 +163,7 @@ public class GroupControllerImpl implements GroupController {
 		try {
 			return new ResponseEntity<>(groupManager.getGroupMembers(id), HttpStatus.OK);
 		} catch (NoResultException e) {
-			return new ResponseEntity<>(errorHeaders(e.getMessage()), HttpStatus.NOT_FOUND);
+			return new ResponseEntity<>(http.errorHeaders(e.getMessage()), HttpStatus.NOT_FOUND);
 		}
 	}
 
@@ -184,6 +173,7 @@ public class GroupControllerImpl implements GroupController {
 	 * @param id the ID of the group to update
 	 * @param username the name of the user to add
 	 * @return HTTP status "OK" and a response containing a Json object corresponding to the list of users after addition or 
+	 *         HTTP status "NOT_MODIFIED" and a warning message, if the user is already a member of the group, or
 	 * 		   HTTP status "NOT_FOUND" and an error message, if no user group with the given ID or no user with the given name exists, or
 	 *         HTTP status "BAD_REQUEST" and an error message, if any of the input data was invalid
 	 */
@@ -193,10 +183,12 @@ public class GroupControllerImpl implements GroupController {
 		
 		try {
 			return new ResponseEntity<>(groupManager.addGroupMember(id, username), HttpStatus.CREATED);
+		} catch (GroupManager.NotModifiedException e) {
+			return new ResponseEntity<>(http.errorHeaders(e.getMessage()), HttpStatus.NOT_MODIFIED);
 		} catch (EntityNotFoundException e) {
-			return new ResponseEntity<>(errorHeaders(e.getMessage()), HttpStatus.NOT_FOUND);
+			return new ResponseEntity<>(http.errorHeaders(e.getMessage()), HttpStatus.NOT_FOUND);
 		} catch (IllegalArgumentException e) {
-			return new ResponseEntity<>(errorHeaders(e.getMessage()), HttpStatus.BAD_REQUEST);
+			return new ResponseEntity<>(http.errorHeaders(e.getMessage()), HttpStatus.BAD_REQUEST);
 		}
 	}
 
@@ -206,6 +198,7 @@ public class GroupControllerImpl implements GroupController {
 	 * @param id the group ID
 	 * @param username the name of the user to remove
 	 * @return HTTP status "OK" and a response containing a Json object corresponding to the list of users after removal or 
+	 *         HTTP status "NOT_MODIFIED" and a warning message, if the user is not a member of the group, or
 	 *         HTTP status "NOT_FOUND", if the group did not exist, or
 	 *         HTTP status "NOT_MODIFIED", if the deletion was unsuccessful
 	 */
@@ -216,10 +209,12 @@ public class GroupControllerImpl implements GroupController {
 		try {
 			groupManager.removeGroupMember(id, username);
 			return new ResponseEntity<>(new HttpHeaders(), HttpStatus.NO_CONTENT);
+		} catch (GroupManager.NotModifiedException e) {
+			return new ResponseEntity<>(http.errorHeaders(e.getMessage()), HttpStatus.NOT_MODIFIED);
 		} catch (EntityNotFoundException e) {
-			return new ResponseEntity<>(errorHeaders(e.getMessage()), HttpStatus.NOT_FOUND);
+			return new ResponseEntity<>(http.errorHeaders(e.getMessage()), HttpStatus.NOT_FOUND);
 		} catch (RuntimeException e) {
-			return new ResponseEntity<>(errorHeaders(e.getMessage()), HttpStatus.NOT_MODIFIED);
+			return new ResponseEntity<>(http.errorHeaders(e.getMessage()), HttpStatus.NOT_MODIFIED);
 		}
 	}
 

@@ -5,8 +5,6 @@
  */
 package de.dlr.proseo.ui.cli;
 
-import static de.dlr.proseo.ui.backend.UIMessages.*;
-
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.Charset;
@@ -18,8 +16,6 @@ import java.util.Date;
 import java.util.List;
 import java.util.Map;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Component;
@@ -28,11 +24,15 @@ import org.springframework.web.util.UriUtils;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import de.dlr.proseo.logging.logger.ProseoLogger;
+import de.dlr.proseo.logging.messages.UIMessage;
+import de.dlr.proseo.model.enums.UserRole;
 import de.dlr.proseo.model.rest.model.RestGroup;
 import de.dlr.proseo.model.rest.model.RestUser;
 import de.dlr.proseo.ui.backend.LoginManager;
 import de.dlr.proseo.ui.backend.ServiceConfiguration;
 import de.dlr.proseo.ui.backend.ServiceConnection;
+import de.dlr.proseo.ui.cli.CLIUtil.Credentials;
 import de.dlr.proseo.ui.cli.parser.ParsedCommand;
 import de.dlr.proseo.ui.cli.parser.ParsedOption;
 import de.dlr.proseo.ui.cli.parser.ParsedParameter;
@@ -48,6 +48,7 @@ public class UserCommandRunner {
 
 	/* General string constants */
 	public static final String CMD_USER = "user";
+	public static final String CMD_PASSWORD = "password";
 	public static final String CMD_GROUP = "group";
 	private static final String CMD_ADD = "add";
 	private static final String CMD_REMOVE = "remove";
@@ -60,6 +61,13 @@ public class UserCommandRunner {
 	private static final String CMD_CREATE = "create";
 	private static final String CMD_UPDATE = "update";
 	private static final String CMD_DELETE = "delete";
+
+	private static final String OPTION_DELETE_ATTRIBUTES = "delete-attributes";
+	private static final String OPTION_VERBOSE = "verbose";
+	private static final String OPTION_IDENT_FILE = "identFile";
+	private static final String OPTION_MISSION = "mission";
+	private static final String OPTION_FORMAT = "format";
+	private static final String OPTION_FILE = "file";
 
 	private static final String MSG_CHECKING_FOR_MISSING_MANDATORY_ATTRIBUTES = "Checking for missing mandatory attributes ...";
 	private static final String PROMPT_USER_NAME = "User name (empty field cancels): ";
@@ -90,7 +98,7 @@ public class UserCommandRunner {
 	private static BCryptPasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
 	
 	/** A logger for this class */
-	private static Logger logger = LoggerFactory.getLogger(UserCommandRunner.class);
+	private static ProseoLogger logger = new ProseoLogger(UserCommandRunner.class);
 
 
 	/**
@@ -106,7 +114,7 @@ public class UserCommandRunner {
 		
 		if (null == username || username.isBlank()) {
 			// No identifying value given
-			System.err.println(uiMsg(MSG_ID_NO_USERNAME_GIVEN));
+			System.err.println(ProseoLogger.format(UIMessage.NO_USERNAME_GIVEN));
 			return null;
 		}
 		RestUser restUser = null;
@@ -118,19 +126,21 @@ public class UserCommandRunner {
 			String message = null;
 			switch (e.getRawStatusCode()) {
 			case org.apache.http.HttpStatus.SC_NOT_FOUND:
-				message = uiMsg(MSG_ID_USER_NOT_FOUND_BY_NAME, username, loginManager.getMission());
+				message = ProseoLogger.format(UIMessage.USER_NOT_FOUND_BY_NAME, username, loginManager.getMission());
 				break;
 			case org.apache.http.HttpStatus.SC_UNAUTHORIZED:
 			case org.apache.http.HttpStatus.SC_FORBIDDEN:
-				message = uiMsg(MSG_ID_NOT_AUTHORIZED, loginManager.getUser(), USERS, loginManager.getMission());
+				message = (null == e.getStatusText() ?
+						ProseoLogger.format(UIMessage.NOT_AUTHORIZED, loginManager.getUser(), USERS, loginManager.getMission()) :
+						e.getStatusText());
 				break;
 			default:
-				message = uiMsg(MSG_ID_EXCEPTION, e.getMessage());
+				message = ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage());
 			}
 			System.err.println(message);
 			return null;
 		} catch (RuntimeException e) {
-			System.err.println(uiMsg(MSG_ID_EXCEPTION, e.getMessage()));
+			System.err.println(ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage()));
 			return null;
 		}
 
@@ -154,25 +164,27 @@ public class UserCommandRunner {
 			String message = null;
 			switch (e.getRawStatusCode()) {
 			case org.apache.http.HttpStatus.SC_NOT_MODIFIED:
-				System.out.println(uiMsg(MSG_ID_NOT_MODIFIED));
+				System.out.println(ProseoLogger.format(UIMessage.NOT_MODIFIED));
 				return null;
 			case org.apache.http.HttpStatus.SC_NOT_FOUND:
-				message = uiMsg(MSG_ID_USER_NOT_FOUND_BY_NAME, restUser.getUsername(), loginManager.getMission());
+				message = ProseoLogger.format(UIMessage.USER_NOT_FOUND_BY_NAME, restUser.getUsername(), loginManager.getMission());
 				break;
 			case org.apache.http.HttpStatus.SC_BAD_REQUEST:
-				message = uiMsg(MSG_ID_USER_DATA_INVALID, e.getMessage());
+				message = ProseoLogger.format(UIMessage.USER_DATA_INVALID, e.getStatusText());
 				break;
 			case org.apache.http.HttpStatus.SC_UNAUTHORIZED:
 			case org.apache.http.HttpStatus.SC_FORBIDDEN:
-				message = uiMsg(MSG_ID_NOT_AUTHORIZED, loginManager.getUser(), USERS, loginManager.getMission());
+				message = (null == e.getStatusText() ?
+						ProseoLogger.format(UIMessage.NOT_AUTHORIZED, loginManager.getUser(), USERS, loginManager.getMission()) :
+						e.getStatusText());
 				break;
 			default:
-				message = uiMsg(MSG_ID_EXCEPTION, e.getMessage());
+				message = ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage());
 			}
 			System.err.println(message);
 			return null;
 		} catch (RuntimeException e) {
-			System.err.println(uiMsg(MSG_ID_EXCEPTION, e.getMessage()));
+			System.err.println(ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage()));
 			return null;
 		}
 		return restUser;
@@ -191,7 +203,7 @@ public class UserCommandRunner {
 		
 		if (null == groupName || groupName.isBlank()) {
 			// No identifying value given
-			System.err.println(uiMsg(MSG_ID_NO_GROUPNAME_GIVEN));
+			System.err.println(ProseoLogger.format(UIMessage.NO_GROUPNAME_GIVEN));
 			return null;
 		}
 		List<?> resultList = null;
@@ -203,24 +215,25 @@ public class UserCommandRunner {
 			String message = null;
 			switch (e.getRawStatusCode()) {
 			case org.apache.http.HttpStatus.SC_NOT_FOUND:
-				message = uiMsg(MSG_ID_GROUP_NOT_FOUND_BY_NAME, groupName,  loginManager.getMission());
+				message = ProseoLogger.format(UIMessage.GROUP_NOT_FOUND_BY_NAME, groupName,  loginManager.getMission());
 				break;
 			case org.apache.http.HttpStatus.SC_UNAUTHORIZED:
 			case org.apache.http.HttpStatus.SC_FORBIDDEN:
-				message = uiMsg(MSG_ID_NOT_AUTHORIZED, loginManager.getUser(), GROUPS, loginManager.getMission());
+				message = (null == e.getStatusText() ?
+						ProseoLogger.format(UIMessage.NOT_AUTHORIZED, loginManager.getUser(), GROUPS, loginManager.getMission()) :
+						e.getStatusText());
 				break;
 			default:
-				message = uiMsg(MSG_ID_EXCEPTION, e.getMessage());
+				message = ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage());
 			}
 			System.err.println(message);
 			return null;
 		} catch (RuntimeException e) {
-			System.err.println(uiMsg(MSG_ID_EXCEPTION, e.getMessage()));
+			System.err.println(ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage()));
 			return null;
 		}
 		if (resultList.isEmpty()) {
-			String message = uiMsg(MSG_ID_GROUP_NOT_FOUND_BY_NAME, groupName,  loginManager.getMission());
-			logger.error(message);
+			String message = logger.log(UIMessage.GROUP_NOT_FOUND_BY_NAME, groupName,  loginManager.getMission());
 			System.err.println(message);
 			return null;
 		}
@@ -245,25 +258,27 @@ public class UserCommandRunner {
 			String message = null;
 			switch (e.getRawStatusCode()) {
 			case org.apache.http.HttpStatus.SC_NOT_MODIFIED:
-				System.out.println(uiMsg(MSG_ID_NOT_MODIFIED));
+				System.out.println(ProseoLogger.format(UIMessage.NOT_MODIFIED));
 				return null;
 			case org.apache.http.HttpStatus.SC_NOT_FOUND:
-				message = uiMsg(MSG_ID_GROUP_NOT_FOUND_BY_ID, restGroup.getId());
+				message = ProseoLogger.format(UIMessage.GROUP_NOT_FOUND_BY_ID, restGroup.getId());
 				break;
 			case org.apache.http.HttpStatus.SC_BAD_REQUEST:
-				message = uiMsg(MSG_ID_GROUP_DATA_INVALID, e.getMessage());
+				message = ProseoLogger.format(UIMessage.GROUP_DATA_INVALID, e.getStatusText());
 				break;
 			case org.apache.http.HttpStatus.SC_UNAUTHORIZED:
 			case org.apache.http.HttpStatus.SC_FORBIDDEN:
-				message = uiMsg(MSG_ID_NOT_AUTHORIZED, loginManager.getUser(), GROUPS, loginManager.getMission());
+				message = (null == e.getStatusText() ?
+						ProseoLogger.format(UIMessage.NOT_AUTHORIZED, loginManager.getUser(), GROUPS, loginManager.getMission()) :
+						e.getStatusText());
 				break;
 			default:
-				message = uiMsg(MSG_ID_EXCEPTION, e.getMessage());
+				message = ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage());
 			}
 			System.err.println(message);
 			return null;
 		} catch (RuntimeException e) {
-			System.err.println(uiMsg(MSG_ID_EXCEPTION, e.getMessage()));
+			System.err.println(ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage()));
 			return null;
 		}
 		return restGroup;
@@ -281,22 +296,26 @@ public class UserCommandRunner {
 		/* Check command options */
 		File userAccountFile = null;
 		String userAccountFileFormat = CLIUtil.FILE_FORMAT_JSON;
-		String missionCode = loginManager.getMission();
+		String missionPrefix = loginManager.getMissionPrefix();
+		String identFile = null;
 		for (ParsedOption option: createCommand.getOptions()) {
 			switch(option.getName()) {
-			case "file":
+			case OPTION_FILE:
 				userAccountFile = new File(option.getValue());
 				break;
-			case "format":
+			case OPTION_FORMAT:
 				userAccountFileFormat = option.getValue().toUpperCase();
 				break;
-			case "mission":
-				if (null == missionCode) {
-					missionCode = option.getValue().toUpperCase();
+			case OPTION_MISSION:
+				if (missionPrefix.isBlank()) {
+					missionPrefix = option.getValue().toUpperCase() + LoginManager.MISSION_PREFIX_CHAR;
 				} else {
-					System.err.println(uiMsg(MSG_ID_MISSION_ALREADY_SET, missionCode));
+					System.err.println(ProseoLogger.format(UIMessage.MISSION_ALREADY_SET, loginManager.getMission()));
 					return;
 				}
+				break;
+			case OPTION_IDENT_FILE:
+				identFile = option.getValue();
 				break;
 			}
 		}
@@ -309,7 +328,7 @@ public class UserCommandRunner {
 			try {
 				restUser = CLIUtil.parseObjectFile(userAccountFile, userAccountFileFormat, RestUser.class);
 			} catch (IllegalArgumentException | IOException e) {
-				System.err.println(uiMsg(MSG_ID_EXCEPTION, e.getMessage()));
+				System.err.println(ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage()));
 				return;
 			}
 		}
@@ -319,18 +338,13 @@ public class UserCommandRunner {
 			ParsedParameter param = createCommand.getParameters().get(i);
 			if (0 == i) {
 				// First parameter is user account name
-				restUser.setUsername((null == missionCode ? "" : missionCode + "-") + param.getValue());
+				restUser.setUsername(missionPrefix + param.getValue());
 			} else {
 				// Remaining parameters are "attribute=value" parameters
 				try {
-					// Handle special case: Password is unencrypted on command line
-					if (param.getValue().startsWith("password=")) {
-						// Due to parsing guaranteed to be "password=value"
-						param.setValue("password=" + passwordEncoder.encode(param.getValue().split("=")[1]));
-					}
 					CLIUtil.setAttribute(restUser, param.getValue());
 				} catch (Exception e) {
-					System.err.println(uiMsg(MSG_ID_EXCEPTION, e.getMessage()));
+					// Already logged and printed
 					return;
 				}
 			}
@@ -342,28 +356,59 @@ public class UserCommandRunner {
 		}
 		
 		/* Prompt user for missing mandatory attributes */
-		System.out.println(MSG_CHECKING_FOR_MISSING_MANDATORY_ATTRIBUTES);
+		if (null != System.console()) System.out.println(MSG_CHECKING_FOR_MISSING_MANDATORY_ATTRIBUTES);
 
 		if (null == restUser.getUsername() || restUser.getUsername().isEmpty()) {
+			if (null == System.console()) {
+				logger.log(UIMessage.MANDATORY_ATTRIBUTE_MISSING, "username");
+				return;
+			}
 			System.out.print(PROMPT_USER_NAME);
 			String response = System.console().readLine();
 			if (response.isBlank()) {
-				System.out.println(uiMsg(MSG_ID_OPERATION_CANCELLED));
+				System.out.println(ProseoLogger.format(UIMessage.OPERATION_CANCELLED));
 				return;
 			}
-			restUser.setUsername((null == missionCode ? "" : missionCode + "-") + response);
+			restUser.setUsername(missionPrefix + response);
+		}
+		// Handle safe password setting for user creation (--identFile ?)
+		restUser.setPassword(null); // Never mind what the account file said!
+		if (null != identFile) {
+			try {
+				Credentials credentials = CLIUtil.readIdentFile(identFile);
+				String bareUserName = (restUser.getUsername().startsWith(missionPrefix) ?
+						restUser.getUsername().substring(missionPrefix.length()) :
+						restUser.getUsername());
+				if (!credentials.username.equals(bareUserName)) {
+					String message = logger.log(UIMessage.USERNAME_MISMATCH, bareUserName, credentials.username, identFile);
+					if (null != System.console()) System.err.println(message);
+					return;
+				}
+				restUser.setPassword(passwordEncoder.encode(credentials.password));
+			} catch (Exception e) {
+				// Error already handled
+				return;
+			}
 		}
 		while (null == restUser.getPassword() || restUser.getPassword().isEmpty()) {
+			if (null == System.console()) {
+				logger.log(UIMessage.MANDATORY_ATTRIBUTE_MISSING, "password");
+				return;
+			}
 			System.out.print(PROMPT_PASSWORD);
 			String response = new String(System.console().readPassword());
 			if (response.isBlank()) {
-				System.out.println(uiMsg(MSG_ID_OPERATION_CANCELLED));
+				System.out.println(ProseoLogger.format(UIMessage.OPERATION_CANCELLED));
 				return;
+			}
+			if (!loginManager.isPasswordStrengthOk(response)) {
+				// Error handled in called method
+				continue;
 			}
 			System.out.print(PROMPT_PASSWORD_REPEAT);
 			String response2 = new String(System.console().readPassword());
 			if (!response.equals(response2)) {
-				System.out.println(uiMsg(MSG_ID_PASSWORD_MISMATCH));
+				System.out.println(ProseoLogger.format(UIMessage.PASSWORD_MISMATCH));
 				continue;
 			}
 			restUser.setPassword(passwordEncoder.encode(response));
@@ -377,25 +422,26 @@ public class UserCommandRunner {
 			String message = null;
 			switch (e.getRawStatusCode()) {
 			case org.apache.http.HttpStatus.SC_BAD_REQUEST:
-				message = uiMsg(MSG_ID_USER_DATA_INVALID, e.getMessage());
+				message = ProseoLogger.format(UIMessage.USER_DATA_INVALID, e.getStatusText());
 				break;
 			case org.apache.http.HttpStatus.SC_UNAUTHORIZED:
 			case org.apache.http.HttpStatus.SC_FORBIDDEN:
-				message = uiMsg(MSG_ID_NOT_AUTHORIZED, loginManager.getUser(), USERS, loginManager.getMission());
+				message = (null == e.getStatusText() ?
+						ProseoLogger.format(UIMessage.NOT_AUTHORIZED, loginManager.getUser(), USERS, loginManager.getMission()) :
+						e.getStatusText());
 				break;
 			default:
-				message = uiMsg(MSG_ID_EXCEPTION, e.getMessage());
+				message = ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage());
 			}
 			System.err.println(message);
 			return;
 		} catch (RuntimeException e) {
-			System.err.println(uiMsg(MSG_ID_EXCEPTION, e.getMessage()));
+			System.err.println(ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage()));
 			return;
 		}
 
 		/* Report success */
-		String message = uiMsg(MSG_ID_USER_CREATED, restUser.getUsername());
-		logger.info(message);
+		String message = logger.log(UIMessage.USER_CREATED, restUser.getUsername());
 		System.out.println(message);
 	}
 
@@ -413,10 +459,10 @@ public class UserCommandRunner {
 		boolean isVerbose = false;
 		for (ParsedOption option: showCommand.getOptions()) {
 			switch(option.getName()) {
-			case "format":
+			case OPTION_FORMAT:
 				userAccountOutputFormat = option.getValue().toUpperCase();
 				break;
-			case "verbose":
+			case OPTION_VERBOSE:
 				isVerbose = true;
 				break;
 			}
@@ -438,26 +484,28 @@ public class UserCommandRunner {
 				String message = null;
 				switch (e.getRawStatusCode()) {
 				case org.apache.http.HttpStatus.SC_NOT_FOUND:
-					message = uiMsg(MSG_ID_NO_USERS_FOUND, loginManager.getMission());
+					message = ProseoLogger.format(UIMessage.NO_USERS_FOUND, loginManager.getMission());
 					break;
 				case org.apache.http.HttpStatus.SC_UNAUTHORIZED:
 				case org.apache.http.HttpStatus.SC_FORBIDDEN:
-					message = uiMsg(MSG_ID_NOT_AUTHORIZED, loginManager.getUser(), USERS, loginManager.getMission());
+					message = (null == e.getStatusText() ?
+							ProseoLogger.format(UIMessage.NOT_AUTHORIZED, loginManager.getUser(), USERS, loginManager.getMission()) :
+							e.getStatusText());
 					break;
 				default:
-					message = uiMsg(MSG_ID_EXCEPTION, e.getMessage());
+					message = ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage());
 				}
 				System.err.println(message);
 				return;
 			} catch (RuntimeException e) {
-				System.err.println(uiMsg(MSG_ID_EXCEPTION, e.getMessage()));
+				System.err.println(ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage()));
 				return;
 			}
 		} else {
 			// Only user name allowed as parameter
 			String username = showCommand.getParameters().get(0).getValue();
 			isVerbose = true; // implied, if only a single user is requested
-			result = readUser(loginManager.getMission() + "-" + username);
+			result = readUser(loginManager.getMissionPrefix() + username);
 			if (null == result)	{
 				// Error handled by called method
 				return;
@@ -473,7 +521,7 @@ public class UserCommandRunner {
 				System.err.println(e.getMessage());
 				return;
 			} catch (IOException e) {
-				System.err.println(uiMsg(MSG_ID_EXCEPTION, e.getMessage()));
+				System.err.println(ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage()));
 				return;
 			}
 		} else {
@@ -500,13 +548,13 @@ public class UserCommandRunner {
 		boolean isDeleteAttributes = false;
 		for (ParsedOption option: updateCommand.getOptions()) {
 			switch(option.getName()) {
-			case "file":
+			case OPTION_FILE:
 				userFile = new File(option.getValue());
 				break;
-			case "format":
+			case OPTION_FORMAT:
 				userFileFormat = option.getValue().toUpperCase();
 				break;
-			case "delete-attributes":
+			case OPTION_DELETE_ATTRIBUTES:
 				isDeleteAttributes = true;
 				break;
 			}
@@ -520,7 +568,7 @@ public class UserCommandRunner {
 			try {
 				updatedUser = CLIUtil.parseObjectFile(userFile, userFileFormat, RestUser.class);
 			} catch (IllegalArgumentException | IOException e) {
-				System.err.println(uiMsg(MSG_ID_EXCEPTION, e.getMessage()));
+				System.err.println(ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage()));
 				return;
 			}
 		}
@@ -530,18 +578,13 @@ public class UserCommandRunner {
 			ParsedParameter param = updateCommand.getParameters().get(i);
 			if (0 == i) {
 				// First parameter is username
-				updatedUser.setUsername(loginManager.getMission() + "-" + param.getValue());
+				updatedUser.setUsername(loginManager.getMissionPrefix() + param.getValue());
 			} else {
 				// Remaining parameters are "attribute=value" parameters
 				try {
-					// Handle special case: Password is unencrypted on command line
-					if (param.getValue().startsWith("password=")) {
-						// Due to parsing guaranteed to be "password=value"
-						param.setValue("password=" + passwordEncoder.encode(param.getValue().split("=")[1]));
-					}
 					CLIUtil.setAttribute(updatedUser, param.getValue());
 				} catch (Exception e) {
-					System.err.println(uiMsg(MSG_ID_EXCEPTION, e.getMessage()));
+					System.err.println(ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage()));
 					return;
 				}
 			}
@@ -555,10 +598,7 @@ public class UserCommandRunner {
 		}
 
 		/* Compare attributes of database user with updated user */
-		// No modification of username allowed
-		if (null != updatedUser.getPassword() && !updatedUser.getPassword().isBlank()) {
-			restUser.setPassword(updatedUser.getPassword());
-		}
+		// No modification of username or password allowed
 		if (null != updatedUser.getEnabled()) {
 			restUser.setEnabled(updatedUser.getEnabled());
 		}
@@ -580,6 +620,9 @@ public class UserCommandRunner {
 				restUser.setPasswordExpirationDate(updatedUser.getPasswordExpirationDate());
 			}
 		}
+		if (isDeleteAttributes || null != updatedUser.getQuota()) {
+			restUser.setQuota(updatedUser.getQuota());
+		}
 		
 		/* Update user using User Manager service */
 		restUser = modifyUser(restUser);
@@ -589,8 +632,7 @@ public class UserCommandRunner {
 		}
 		
 		/* Report success */
-		String message = uiMsg(MSG_ID_USER_UPDATED, restUser.getUsername());
-		logger.info(message);
+		String message = logger.log(UIMessage.USER_UPDATED, restUser.getUsername());
 		System.out.println(message);
 	}
 
@@ -603,14 +645,14 @@ public class UserCommandRunner {
 		if (logger.isTraceEnabled()) logger.trace(">>> deleteUser({})", (null == deleteCommand ? "null" : deleteCommand.getName()));
 
 		/* Check command options */
-		String missionCode = loginManager.getMission();
+		String missionPrefix = loginManager.getMissionPrefix();
 		for (ParsedOption option: deleteCommand.getOptions()) {
 			switch(option.getName()) {
-			case "mission":
-				if (null == missionCode) {
-					missionCode = option.getValue().toUpperCase();
+			case OPTION_MISSION:
+				if (missionPrefix.isBlank()) {
+					missionPrefix = option.getValue().toUpperCase() + LoginManager.MISSION_PREFIX_CHAR;
 				} else {
-					System.err.println(uiMsg(MSG_ID_MISSION_ALREADY_SET, missionCode));
+					System.err.println(ProseoLogger.format(UIMessage.MISSION_ALREADY_SET, missionPrefix));
 					return;
 				}
 				break;
@@ -620,10 +662,10 @@ public class UserCommandRunner {
 		/* Get username from command parameters */
 		if (1 > deleteCommand.getParameters().size()) {
 			// No identifying value given
-			System.err.println(uiMsg(MSG_ID_NO_USERNAME_GIVEN));
+			System.err.println(ProseoLogger.format(UIMessage.NO_USERNAME_GIVEN));
 			return;
 		}
-		String username = (null == missionCode ? "" : missionCode + "-") + deleteCommand.getParameters().get(0).getValue();
+		String username = missionPrefix + deleteCommand.getParameters().get(0).getValue();
 		
 		/* Retrieve the user using User Manager service */
 		RestUser restUser = readUser(username);
@@ -637,28 +679,29 @@ public class UserCommandRunner {
 			String message = null;
 			switch (e.getRawStatusCode()) {
 			case org.apache.http.HttpStatus.SC_NOT_FOUND:
-				message = uiMsg(MSG_ID_USER_NOT_FOUND_BY_NAME, restUser.getUsername());
+				message = ProseoLogger.format(UIMessage.USER_NOT_FOUND_BY_NAME, restUser.getUsername());
 				break;
 			case org.apache.http.HttpStatus.SC_UNAUTHORIZED:
 			case org.apache.http.HttpStatus.SC_FORBIDDEN:
-				message = uiMsg(MSG_ID_NOT_AUTHORIZED, loginManager.getUser(), USERS, loginManager.getMission());
+				message = (null == e.getStatusText() ?
+						ProseoLogger.format(UIMessage.NOT_AUTHORIZED, loginManager.getUser(), USERS, loginManager.getMission()) :
+						e.getStatusText());
 				break;
 			case org.apache.http.HttpStatus.SC_NOT_MODIFIED:
-				message = uiMsg(MSG_ID_USER_DELETE_FAILED, username, e.getMessage());
+				message = ProseoLogger.format(UIMessage.USER_DELETE_FAILED, username, e.getMessage());
 				break;
 			default:
-				message = uiMsg(MSG_ID_EXCEPTION, e.getMessage());
+				message = ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage());
 			}
 			System.err.println(message);
 			return;
 		} catch (Exception e) {
-			System.err.println(uiMsg(MSG_ID_EXCEPTION, e.getMessage()));
+			System.err.println(ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage()));
 			return;
 		}
 		
 		/* Report success */
-		String message = uiMsg(MSG_ID_USER_DELETED, restUser.getUsername());
-		logger.info(message);
+		String message = logger.log(UIMessage.USER_DELETED, restUser.getUsername());
 		System.out.println(message);
 	}
 
@@ -673,10 +716,10 @@ public class UserCommandRunner {
 		/* Get username from command parameters */
 		if (1 > command.getParameters().size()) {
 			// No identifying value given
-			System.err.println(uiMsg(MSG_ID_NO_USERNAME_GIVEN));
+			System.err.println(ProseoLogger.format(UIMessage.NO_USERNAME_GIVEN));
 			return;
 		}
-		String username = loginManager.getMission() + "-" + command.getParameters().get(0).getValue();
+		String username = loginManager.getMissionPrefix() + command.getParameters().get(0).getValue();
 		
 		/* Read original user from User service */
 		RestUser restUser = readUser(username);
@@ -696,8 +739,7 @@ public class UserCommandRunner {
 		}
 		
 		/* Report success */
-		String message = uiMsg(MSG_ID_USER_ENABLED, restUser.getUsername());
-		logger.info(message);
+		String message = logger.log(UIMessage.USER_ENABLED, restUser.getUsername());
 		System.out.println(message);
 	}
 
@@ -712,10 +754,10 @@ public class UserCommandRunner {
 		/* Get username from command parameters */
 		if (1 > command.getParameters().size()) {
 			// No identifying value given
-			System.err.println(uiMsg(MSG_ID_NO_USERNAME_GIVEN));
+			System.err.println(ProseoLogger.format(UIMessage.NO_USERNAME_GIVEN));
 			return;
 		}
-		String username = loginManager.getMission() + "-" + command.getParameters().get(0).getValue();
+		String username = loginManager.getMissionPrefix() + command.getParameters().get(0).getValue();
 		
 		/* Read original user from User service */
 		RestUser restUser = readUser(username);
@@ -735,8 +777,7 @@ public class UserCommandRunner {
 		}
 		
 		/* Report success */
-		String message = uiMsg(MSG_ID_USER_DISABLED, restUser.getUsername());
-		logger.info(message);
+		String message = logger.log(UIMessage.USER_DISABLED, restUser.getUsername());
 		System.out.println(message);
 	}
 
@@ -751,19 +792,26 @@ public class UserCommandRunner {
 		/* Get username from command parameters */
 		if (1 > command.getParameters().size()) {
 			// No identifying value given
-			System.err.println(uiMsg(MSG_ID_NO_USERNAME_GIVEN));
+			System.err.println(ProseoLogger.format(UIMessage.NO_USERNAME_GIVEN));
 			return;
 		}
-		String username = loginManager.getMission() + "-" + command.getParameters().get(0).getValue();
+		String username = loginManager.getMissionPrefix() + command.getParameters().get(0).getValue();
 		
 		/* Get granted authorities from command parameters */
 		List<String> authorities = new ArrayList<>();
 		for (int i = 1; i < command.getParameters().size(); ++i) {
-			authorities.add(command.getParameters().get(i).getValue());
+			String authority = command.getParameters().get(i).getValue();
+			try {
+				UserRole.asRole(authority);
+			} catch (IllegalArgumentException e) {
+				System.err.println(ProseoLogger.format(UIMessage.SKIPPING_INVALID_AUTHORITY, authority));
+				continue;
+			}
+			authorities.add(authority);
 		}
 		if (authorities.isEmpty()) {
 			// No authorities to grant given
-			System.err.println(uiMsg(MSG_ID_NO_AUTHORITIES_GIVEN));
+			System.err.println(ProseoLogger.format(UIMessage.NO_AUTHORITIES_GIVEN));
 			return;
 		}
 		
@@ -789,8 +837,7 @@ public class UserCommandRunner {
 		}
 		
 		/* Report success */
-		String message = uiMsg(MSG_ID_AUTHORITIES_GRANTED, Arrays.toString(authorities.toArray()), restUser.getUsername());
-		logger.info(message);
+		String message = logger.log(UIMessage.AUTHORITIES_GRANTED, Arrays.toString(authorities.toArray()), restUser.getUsername());
 		System.out.println(message);
 	}
 
@@ -805,19 +852,26 @@ public class UserCommandRunner {
 		/* Get username from command parameters */
 		if (1 > command.getParameters().size()) {
 			// No identifying value given
-			System.err.println(uiMsg(MSG_ID_NO_USERNAME_GIVEN));
+			System.err.println(ProseoLogger.format(UIMessage.NO_USERNAME_GIVEN));
 			return;
 		}
-		String username = loginManager.getMission() + "-" + command.getParameters().get(0).getValue();
+		String username = loginManager.getMissionPrefix() + command.getParameters().get(0).getValue();
 		
 		/* Get granted authorities from command parameters */
 		List<String> authorities = new ArrayList<>();
 		for (int i = 1; i < command.getParameters().size(); ++i) {
-			authorities.add(command.getParameters().get(i).getValue());
+			String authority = command.getParameters().get(i).getValue();
+			try {
+				UserRole.asRole(authority);
+			} catch (IllegalArgumentException e) {
+				System.err.println(ProseoLogger.format(UIMessage.SKIPPING_INVALID_AUTHORITY, authority));
+				continue;
+			}
+			authorities.add(authority);
 		}
 		if (authorities.isEmpty()) {
 			// No authorities to grant given
-			System.err.println(uiMsg(MSG_ID_NO_AUTHORITIES_GIVEN));
+			System.err.println(ProseoLogger.format(UIMessage.NO_AUTHORITIES_GIVEN));
 			return;
 		}
 		
@@ -839,8 +893,84 @@ public class UserCommandRunner {
 		}
 		
 		/* Report success */
-		String message = uiMsg(MSG_ID_AUTHORITIES_REVOKED, Arrays.toString(authorities.toArray()), restUser.getUsername());
-		logger.info(message);
+		String message = logger.log(UIMessage.AUTHORITIES_REVOKED, Arrays.toString(authorities.toArray()), restUser.getUsername());
+		System.out.println(message);
+	}
+
+	/**
+	 * Interactively change the password of the logged in user,
+	 * or of the named user, if executed by a user with user manager permissions
+	 * 
+	 * @param passwordCommand the parsed "password" command
+	 */
+	private void changePassword(ParsedCommand passwordCommand) {
+		if (logger.isTraceEnabled()) logger.trace(">>> changePassword({})", (null == passwordCommand ? "null" : passwordCommand));
+		
+		if (null == System.console()) {
+			logger.log(UIMessage.PASSWORD_CHANGE_NOT_ALLOWED);
+			return;
+		}
+
+		/* Check command parameters */
+		String userName = loginManager.getUser();
+		if (0 < passwordCommand.getParameters().size()) {
+			userName = loginManager.getMissionPrefix() + passwordCommand.getParameters().get(0).getValue();
+		}
+		
+		/* Find the given user */
+		RestUser restUser = readUser(userName);
+		if (null == restUser) {
+			// Error handled by called method
+			return;
+		}
+		
+		/* Prompt user for new password */
+		restUser.setPassword(null);
+		String newPassword = null;
+		while (null == restUser.getPassword() || restUser.getPassword().isEmpty()) {
+			System.out.print(PROMPT_PASSWORD);
+			newPassword = new String(System.console().readPassword());
+			if (newPassword.isBlank()) {
+				System.out.println(ProseoLogger.format(UIMessage.OPERATION_CANCELLED));
+				return;
+			}
+			// Password must be different from previous password (as far as we can tell, i.e. only for the logged-in user)
+			if (userName.equals(loginManager.getUser()) && newPassword.equals(loginManager.getPassword())) {
+				System.out.println(ProseoLogger.format(UIMessage.PASSWORDS_MUST_DIFFER));
+				continue;
+			}
+			// Ensure password strength
+			if (!loginManager.isPasswordStrengthOk(newPassword)) {
+				// Error handled in called method
+				continue;
+			}
+			// Repeat password
+			System.out.print(PROMPT_PASSWORD_REPEAT);
+			String response2 = new String(System.console().readPassword());
+			if (!newPassword.equals(response2)) {
+				System.out.println(ProseoLogger.format(UIMessage.PASSWORD_MISMATCH));
+				continue;
+			}
+			restUser.setPassword(passwordEncoder.encode(newPassword));
+		}
+		
+		/* Update user using User Manager service */
+		restUser = modifyUser(restUser);
+		if (null == restUser) {
+			// Error handled by called method;
+			return;
+		}
+		
+		/* If the password of the logged-in user was changed, notify the Login Manager */
+		if (userName.equals(loginManager.getUser())) {
+			String bareUserName = (userName.startsWith(loginManager.getMissionPrefix()) ? 
+					userName.substring(loginManager.getMissionPrefix().length()) : 
+					userName);
+			loginManager.doLogin(bareUserName, newPassword, loginManager.getMission(), false);
+		}
+		
+		/* Report success */
+		String message = logger.log(UIMessage.PASSWORD_CHANGED, restUser.getUsername());
 		System.out.println(message);
 	}
 
@@ -858,10 +988,10 @@ public class UserCommandRunner {
 		String groupAccountFileFormat = CLIUtil.FILE_FORMAT_JSON;
 		for (ParsedOption option: createCommand.getOptions()) {
 			switch(option.getName()) {
-			case "file":
+			case OPTION_FILE:
 				groupAccountFile = new File(option.getValue());
 				break;
-			case "format":
+			case OPTION_FORMAT:
 				groupAccountFileFormat = option.getValue().toUpperCase();
 				break;
 			}
@@ -875,7 +1005,7 @@ public class UserCommandRunner {
 			try {
 				restGroup = CLIUtil.parseObjectFile(groupAccountFile, groupAccountFileFormat, RestGroup.class);
 			} catch (IllegalArgumentException | IOException e) {
-				System.err.println(uiMsg(MSG_ID_EXCEPTION, e.getMessage()));
+				System.err.println(ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage()));
 				return;
 			}
 		}
@@ -885,29 +1015,33 @@ public class UserCommandRunner {
 			ParsedParameter param = createCommand.getParameters().get(i);
 			if (0 == i) {
 				// First parameter is user group name
-				restGroup.setGroupname(loginManager.getMission() + "-" + param.getValue());
+				restGroup.setGroupname(loginManager.getMissionPrefix() + param.getValue());
 			} else {
 				// Remaining parameters are "attribute=value" parameters
 				try {
 					CLIUtil.setAttribute(restGroup, param.getValue());
 				} catch (Exception e) {
-					System.err.println(uiMsg(MSG_ID_EXCEPTION, e.getMessage()));
+					System.err.println(ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage()));
 					return;
 				}
 			}
 		}
 		
 		/* Prompt user for missing mandatory attributes */
-		System.out.println(MSG_CHECKING_FOR_MISSING_MANDATORY_ATTRIBUTES);
+		if (null != System.console()) System.out.println(MSG_CHECKING_FOR_MISSING_MANDATORY_ATTRIBUTES);
 
 		if (null == restGroup.getGroupname() || restGroup.getGroupname().isEmpty()) {
+			if (null == System.console()) {
+				logger.log(UIMessage.MANDATORY_ATTRIBUTE_MISSING, "groupname");
+				return;
+			}
 			System.out.print(PROMPT_GROUP_NAME);
 			String response = System.console().readLine();
 			if (response.isBlank()) {
-				System.out.println(uiMsg(MSG_ID_OPERATION_CANCELLED));
+				System.out.println(ProseoLogger.format(UIMessage.OPERATION_CANCELLED));
 				return;
 			}
-			restGroup.setGroupname(loginManager.getMission() + "-" + response);
+			restGroup.setGroupname(loginManager.getMissionPrefix() + response);
 		}
 		
 		/* Create user group */
@@ -918,25 +1052,26 @@ public class UserCommandRunner {
 			String message = null;
 			switch (e.getRawStatusCode()) {
 			case org.apache.http.HttpStatus.SC_BAD_REQUEST:
-				message = uiMsg(MSG_ID_GROUP_DATA_INVALID, e.getMessage());
+				message = ProseoLogger.format(UIMessage.GROUP_DATA_INVALID, e.getStatusText());
 				break;
 			case org.apache.http.HttpStatus.SC_UNAUTHORIZED:
 			case org.apache.http.HttpStatus.SC_FORBIDDEN:
-				message = uiMsg(MSG_ID_NOT_AUTHORIZED, loginManager.getUser(), USERS, loginManager.getMission());
+				message = (null == e.getStatusText() ?
+						ProseoLogger.format(UIMessage.NOT_AUTHORIZED, loginManager.getUser(), USERS, loginManager.getMission()) :
+						e.getStatusText());
 				break;
 			default:
-				message = uiMsg(MSG_ID_EXCEPTION, e.getMessage());
+				message = ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage());
 			}
 			System.err.println(message);
 			return;
 		} catch (RuntimeException e) {
-			System.err.println(uiMsg(MSG_ID_EXCEPTION, e.getMessage()));
+			System.err.println(ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage()));
 			return;
 		}
 
 		/* Report success */
-		String message = uiMsg(MSG_ID_GROUP_CREATED, restGroup.getGroupname());
-		logger.info(message);
+		String message = logger.log(UIMessage.GROUP_CREATED, restGroup.getGroupname());
 		System.out.println(message);
 	}
 
@@ -954,10 +1089,10 @@ public class UserCommandRunner {
 		boolean isVerbose = false;
 		for (ParsedOption option: showCommand.getOptions()) {
 			switch(option.getName()) {
-			case "format":
+			case OPTION_FORMAT:
 				userAccountOutputFormat = option.getValue().toUpperCase();
 				break;
-			case "verbose":
+			case OPTION_VERBOSE:
 				isVerbose = true;
 				break;
 			}
@@ -978,19 +1113,21 @@ public class UserCommandRunner {
 				String message = null;
 				switch (e.getRawStatusCode()) {
 				case org.apache.http.HttpStatus.SC_NOT_FOUND:
-					message = uiMsg(MSG_ID_NO_GROUPS_FOUND, loginManager.getMission());
+					message = ProseoLogger.format(UIMessage.NO_GROUPS_FOUND, loginManager.getMission());
 					break;
 				case org.apache.http.HttpStatus.SC_UNAUTHORIZED:
 				case org.apache.http.HttpStatus.SC_FORBIDDEN:
-					message = uiMsg(MSG_ID_NOT_AUTHORIZED, loginManager.getUser(), USERS, loginManager.getMission());
+					message = (null == e.getStatusText() ?
+							ProseoLogger.format(UIMessage.NOT_AUTHORIZED, loginManager.getUser(), USERS, loginManager.getMission()) :
+							e.getStatusText());
 					break;
 				default:
-					message = uiMsg(MSG_ID_EXCEPTION, e.getMessage());
+					message = ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage());
 				}
 				System.err.println(message);
 				return;
 			} catch (RuntimeException e) {
-				System.err.println(uiMsg(MSG_ID_EXCEPTION, e.getMessage()));
+				System.err.println(ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage()));
 				return;
 			}
 		} else {
@@ -998,7 +1135,7 @@ public class UserCommandRunner {
 			String groupName = showCommand.getParameters().get(0).getValue();
 			isVerbose = true; // implied, if only a single user is requested
 			
-			result = readGroup(loginManager.getMission() + "-" + groupName);
+			result = readGroup(loginManager.getMissionPrefix() + groupName);
 			if (null == result)	{
 				// Error handled by called method
 				return;
@@ -1013,7 +1150,7 @@ public class UserCommandRunner {
 				System.err.println(e.getMessage());
 				return;
 			} catch (IOException e) {
-				System.err.println(uiMsg(MSG_ID_EXCEPTION, e.getMessage()));
+				System.err.println(ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage()));
 				return;
 			}
 		} else {
@@ -1040,13 +1177,13 @@ public class UserCommandRunner {
 		boolean isDeleteAttributes = false;
 		for (ParsedOption option: updateCommand.getOptions()) {
 			switch(option.getName()) {
-			case "file":
+			case OPTION_FILE:
 				groupFile = new File(option.getValue());
 				break;
-			case "format":
+			case OPTION_FORMAT:
 				groupFileFormat = option.getValue().toUpperCase();
 				break;
-			case "delete-attributes":
+			case OPTION_DELETE_ATTRIBUTES:
 				isDeleteAttributes = true;
 				break;
 			}
@@ -1060,7 +1197,7 @@ public class UserCommandRunner {
 			try {
 				updatedGroup = CLIUtil.parseObjectFile(groupFile, groupFileFormat, RestGroup.class);
 			} catch (IllegalArgumentException | IOException e) {
-				System.err.println(uiMsg(MSG_ID_EXCEPTION, e.getMessage()));
+				System.err.println(ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage()));
 				return;
 			}
 		}
@@ -1070,13 +1207,13 @@ public class UserCommandRunner {
 			ParsedParameter param = updateCommand.getParameters().get(i);
 			if (0 == i) {
 				// First parameter is group name
-				updatedGroup.setGroupname(loginManager.getMission() + "-" + param.getValue());
+				updatedGroup.setGroupname(loginManager.getMissionPrefix() + param.getValue());
 			} else {
 				// Remaining parameters are "attribute=value" parameters
 				try {
 					CLIUtil.setAttribute(updatedGroup, param.getValue());
 				} catch (Exception e) {
-					System.err.println(uiMsg(MSG_ID_EXCEPTION, e.getMessage()));
+					System.err.println(ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage()));
 					return;
 				}
 			}
@@ -1104,8 +1241,7 @@ public class UserCommandRunner {
 		}
 		
 		/* Report success */
-		String message = uiMsg(MSG_ID_GROUP_UPDATED, restGroup.getGroupname());
-		logger.info(message);
+		String message = logger.log(UIMessage.GROUP_UPDATED, restGroup.getGroupname());
 		System.out.println(message);
 	}
 
@@ -1120,10 +1256,10 @@ public class UserCommandRunner {
 		/* Get group name from command parameters */
 		if (1 > deleteCommand.getParameters().size()) {
 			// No identifying value given
-			System.err.println(uiMsg(MSG_ID_NO_GROUPNAME_GIVEN));
+			System.err.println(ProseoLogger.format(UIMessage.NO_GROUPNAME_GIVEN));
 			return;
 		}
-		String groupname = loginManager.getMission() + "-" + deleteCommand.getParameters().get(0).getValue();
+		String groupname = loginManager.getMissionPrefix() + deleteCommand.getParameters().get(0).getValue();
 		
 		/* Retrieve the group using User Manager service */
 		RestGroup restGroup = readGroup(groupname);
@@ -1137,28 +1273,29 @@ public class UserCommandRunner {
 			String message = null;
 			switch (e.getRawStatusCode()) {
 			case org.apache.http.HttpStatus.SC_NOT_FOUND:
-				message = uiMsg(MSG_ID_GROUP_NOT_FOUND_BY_ID, restGroup.getId());
+				message = ProseoLogger.format(UIMessage.GROUP_NOT_FOUND_BY_ID, restGroup.getId());
 				break;
 			case org.apache.http.HttpStatus.SC_UNAUTHORIZED:
 			case org.apache.http.HttpStatus.SC_FORBIDDEN:
-				message = uiMsg(MSG_ID_NOT_AUTHORIZED, loginManager.getUser(), GROUPS, loginManager.getMission());
+				message = (null == e.getStatusText() ?
+						ProseoLogger.format(UIMessage.NOT_AUTHORIZED, loginManager.getUser(), GROUPS, loginManager.getMission()) :
+						e.getStatusText());
 				break;
 			case org.apache.http.HttpStatus.SC_NOT_MODIFIED:
-				message = uiMsg(MSG_ID_GROUP_DELETE_FAILED, groupname, e.getMessage());
+				message = ProseoLogger.format(UIMessage.GROUP_DELETE_FAILED, groupname, e.getMessage());
 				break;
 			default:
-				message = uiMsg(MSG_ID_EXCEPTION, e.getMessage());
+				message = ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage());
 			}
 			System.err.println(message);
 			return;
 		} catch (Exception e) {
-			System.err.println(uiMsg(MSG_ID_EXCEPTION, e.getMessage()));
+			System.err.println(ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage()));
 			return;
 		}
 		
 		/* Report success */
-		String message = uiMsg(MSG_ID_GROUP_DELETED, restGroup.getGroupname());
-		logger.info(message);
+		String message = logger.log(UIMessage.GROUP_DELETED, restGroup.getGroupname());
 		System.out.println(message);
 	}
 
@@ -1173,19 +1310,19 @@ public class UserCommandRunner {
 		/* Get group name from command parameters */
 		if (1 > command.getParameters().size()) {
 			// No identifying value given
-			System.err.println(uiMsg(MSG_ID_NO_GROUPNAME_GIVEN));
+			System.err.println(ProseoLogger.format(UIMessage.NO_GROUPNAME_GIVEN));
 			return;
 		}
-		String groupname = loginManager.getMission() + "-" + command.getParameters().get(0).getValue();
+		String groupname = loginManager.getMissionPrefix() + command.getParameters().get(0).getValue();
 		
 		/* Get user name(s) from command parameters */
 		List<String> usernames = new ArrayList<>();
 		for (int i = 1; i < command.getParameters().size(); ++i) {
-			usernames.add(loginManager.getMission() + "-" + command.getParameters().get(i).getValue());
+			usernames.add(loginManager.getMissionPrefix() + command.getParameters().get(i).getValue());
 		}
 		if (usernames.isEmpty()) {
 			// No users to add given
-			System.err.println(uiMsg(MSG_ID_NO_USERS_GIVEN));
+			System.err.println(ProseoLogger.format(UIMessage.NO_USERS_GIVEN));
 			return;
 		}
 		
@@ -1197,11 +1334,11 @@ public class UserCommandRunner {
 		}
 		
 		/* Check that the users exist and add each one to the group's list of members */
+		List<String> addedUsers = new ArrayList<>();
 		for (String username: usernames) {
 			RestUser restUser = readUser(username);
 			if (null == restUser) {
-				// Invalid user name (at least for the selected mission)
-				System.err.println(uiMsg(MSG_ID_USER_NOT_FOUND_BY_NAME, username, loginManager.getMission()));
+				// Invalid user name (at least for the selected mission) - already logged
 				continue;
 			}
 			
@@ -1210,34 +1347,41 @@ public class UserCommandRunner {
 				serviceConnection.postToService(serviceConfig.getUserManagerUrl(),
 						URI_PATH_GROUPS + "/" + restGroup.getId() + "/members?username=" + username,
 						restGroup, List.class, loginManager.getUser(), loginManager.getPassword());
+				addedUsers.add(username);
 			} catch (RestClientResponseException e) {
 				String message = null;
 				switch (e.getRawStatusCode()) {
+				case org.apache.http.HttpStatus.SC_NOT_MODIFIED:
+					System.out.println(ProseoLogger.format(UIMessage.ALREADY_MEMBER, username, restGroup.getGroupname()));
+					continue;
 				case org.apache.http.HttpStatus.SC_NOT_FOUND:
-					message = uiMsg(MSG_ID_GROUP_NOT_FOUND_BY_ID, restGroup.getId());
+					message = ProseoLogger.format(UIMessage.GROUP_NOT_FOUND_BY_ID, restGroup.getId());
 					break;
 				case org.apache.http.HttpStatus.SC_BAD_REQUEST:
-					message = uiMsg(MSG_ID_GROUP_DATA_INVALID, e.getMessage());
+					message = ProseoLogger.format(UIMessage.GROUP_DATA_INVALID, e.getStatusText());
 					break;
 				case org.apache.http.HttpStatus.SC_UNAUTHORIZED:
 				case org.apache.http.HttpStatus.SC_FORBIDDEN:
-					message = uiMsg(MSG_ID_NOT_AUTHORIZED, loginManager.getUser(), GROUPS, loginManager.getMission());
+					message = (null == e.getStatusText() ?
+							ProseoLogger.format(UIMessage.NOT_AUTHORIZED, loginManager.getUser(), GROUPS, loginManager.getMission()) :
+							e.getStatusText());
 					break;
 				default:
-					message = uiMsg(MSG_ID_EXCEPTION, e.getMessage());
+					message = ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage());
 				}
 				System.err.println(message);
 				return;
 			} catch (RuntimeException e) {
-				System.err.println(uiMsg(MSG_ID_EXCEPTION, e.getMessage()));
+				System.err.println(ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage()));
 				return;
 			}
 		}
 		
-		/* Report success */
-		String message = uiMsg(MSG_ID_USERS_ADDED, Arrays.toString(usernames.toArray()), restGroup.getGroupname());
-		logger.info(message);
-		System.out.println(message);
+		/* Report success, if valid users were added */
+		if (0 < addedUsers.size()) {
+			String message = logger.log(UIMessage.USERS_ADDED, Arrays.toString(addedUsers.toArray()), restGroup.getGroupname());
+			System.out.println(message);
+		}
 	}
 
 	/**
@@ -1251,19 +1395,19 @@ public class UserCommandRunner {
 		/* Get group name from command parameters */
 		if (1 > command.getParameters().size()) {
 			// No identifying value given
-			System.err.println(uiMsg(MSG_ID_NO_GROUPNAME_GIVEN));
+			System.err.println(ProseoLogger.format(UIMessage.NO_GROUPNAME_GIVEN));
 			return;
 		}
-		String groupname = loginManager.getMission() + "-" + command.getParameters().get(0).getValue();
+		String groupname = loginManager.getMissionPrefix() + command.getParameters().get(0).getValue();
 		
 		/* Get user name(s) from command parameters */
 		List<String> usernames = new ArrayList<>();
 		for (int i = 1; i < command.getParameters().size(); ++i) {
-			usernames.add(loginManager.getMission() + "-" + command.getParameters().get(i).getValue());
+			usernames.add(loginManager.getMissionPrefix() + command.getParameters().get(i).getValue());
 		}
 		if (usernames.isEmpty()) {
 			// No users to add given
-			System.err.println(uiMsg(MSG_ID_NO_USERS_GIVEN));
+			System.err.println(ProseoLogger.format(UIMessage.NO_USERS_GIVEN));
 			return;
 		}
 		
@@ -1275,11 +1419,11 @@ public class UserCommandRunner {
 		}
 		
 		/* Check that the users exist and remove each one from the group's list of members */
+		List<String> removedUsers = new ArrayList<>();
 		for (String username: usernames) {
 			RestUser restUser = readUser(username);
 			if (null == restUser) {
-				// Invalid user name (at least for the selected mission)
-				System.err.println(uiMsg(MSG_ID_USER_NOT_FOUND_BY_NAME, username, loginManager.getMission()));
+				// Invalid user name (at least for the selected mission) - already logged
 				continue;
 			}
 			
@@ -1288,34 +1432,41 @@ public class UserCommandRunner {
 				serviceConnection.deleteFromService(serviceConfig.getUserManagerUrl(),
 						URI_PATH_GROUPS + "/" + restGroup.getId() + "/members?username=" + username,
 						loginManager.getUser(), loginManager.getPassword());
+				removedUsers.add(username);
 			} catch (RestClientResponseException e) {
 				String message = null;
 				switch (e.getRawStatusCode()) {
+				case org.apache.http.HttpStatus.SC_NOT_MODIFIED:
+					System.out.println(ProseoLogger.format(UIMessage.NOT_MEMBER, username, restGroup.getGroupname()));
+					continue;
 				case org.apache.http.HttpStatus.SC_NOT_FOUND:
-					message = uiMsg(MSG_ID_GROUP_NOT_FOUND_BY_ID, restGroup.getId());
+					message = ProseoLogger.format(UIMessage.GROUP_NOT_FOUND_BY_ID, restGroup.getId());
 					break;
 				case org.apache.http.HttpStatus.SC_BAD_REQUEST:
-					message = uiMsg(MSG_ID_GROUP_DATA_INVALID, e.getMessage());
+					message = ProseoLogger.format(UIMessage.GROUP_DATA_INVALID, e.getStatusText());
 					break;
 				case org.apache.http.HttpStatus.SC_UNAUTHORIZED:
 				case org.apache.http.HttpStatus.SC_FORBIDDEN:
-					message = uiMsg(MSG_ID_NOT_AUTHORIZED, loginManager.getUser(), GROUPS, loginManager.getMission());
+					message = (null == e.getStatusText() ?
+							ProseoLogger.format(UIMessage.NOT_AUTHORIZED, loginManager.getUser(), GROUPS, loginManager.getMission()) :
+							e.getStatusText());
 					break;
 				default:
-					message = uiMsg(MSG_ID_EXCEPTION, e.getMessage());
+					message = ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage());
 				}
 				System.err.println(message);
 				return;
 			} catch (RuntimeException e) {
-				System.err.println(uiMsg(MSG_ID_EXCEPTION, e.getMessage()));
+				System.err.println(ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage()));
 				return;
 			}
 		}
 		
-		/* Report success */
-		String message = uiMsg(MSG_ID_USERS_REMOVED, Arrays.toString(usernames.toArray()), restGroup.getGroupname());
-		logger.info(message);
-		System.out.println(message);
+		/* Report success, if valid users were removed */
+		if (0 < removedUsers.size()) {
+			String message = logger.log(UIMessage.USERS_REMOVED, Arrays.toString(removedUsers.toArray()), restGroup.getGroupname());
+			System.out.println(message);
+		}
 	}
 
 	/**
@@ -1332,10 +1483,10 @@ public class UserCommandRunner {
 		boolean isVerbose = false;
 		for (ParsedOption option: command.getOptions()) {
 			switch(option.getName()) {
-			case "format":
+			case OPTION_FORMAT:
 				userAccountOutputFormat = option.getValue().toUpperCase();
 				break;
-			case "verbose":
+			case OPTION_VERBOSE:
 				isVerbose = true;
 				break;
 			}
@@ -1344,10 +1495,10 @@ public class UserCommandRunner {
 		/* Get group name from command parameters */
 		if (1 > command.getParameters().size()) {
 			// No identifying value given
-			System.err.println(uiMsg(MSG_ID_NO_GROUPNAME_GIVEN));
+			System.err.println(ProseoLogger.format(UIMessage.NO_GROUPNAME_GIVEN));
 			return;
 		}
-		String groupname = loginManager.getMission() + "-" + command.getParameters().get(0).getValue();
+		String groupname = loginManager.getMissionPrefix() + command.getParameters().get(0).getValue();
 		
 		/* Read original group from User service */
 		RestGroup restGroup = readGroup(groupname);
@@ -1368,19 +1519,21 @@ public class UserCommandRunner {
 			String message = null;
 			switch (e.getRawStatusCode()) {
 			case org.apache.http.HttpStatus.SC_NOT_FOUND:
-				message = uiMsg(MSG_ID_NO_USERS_FOUND_IN_GROUP, groupname);
+				message = ProseoLogger.format(UIMessage.NO_USERS_FOUND_IN_GROUP, groupname);
 				break;
 			case org.apache.http.HttpStatus.SC_UNAUTHORIZED:
 			case org.apache.http.HttpStatus.SC_FORBIDDEN:
-				message = uiMsg(MSG_ID_NOT_AUTHORIZED, loginManager.getUser(), GROUPS, loginManager.getMission());
+				message = (null == e.getStatusText() ?
+						ProseoLogger.format(UIMessage.NOT_AUTHORIZED, loginManager.getUser(), GROUPS, loginManager.getMission()) :
+						e.getStatusText());
 				break;
 			default:
-				message = uiMsg(MSG_ID_EXCEPTION, e.getMessage());
+				message = ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage());
 			}
 			System.err.println(message);
 			return;
 		} catch (RuntimeException e) {
-			System.err.println(uiMsg(MSG_ID_EXCEPTION, e.getMessage()));
+			System.err.println(ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage()));
 			return;
 		}
 
@@ -1392,7 +1545,7 @@ public class UserCommandRunner {
 				System.err.println(e.getMessage());
 				return;
 			} catch (IOException e) {
-				System.err.println(uiMsg(MSG_ID_EXCEPTION, e.getMessage()));
+				System.err.println(ProseoLogger.format(UIMessage.EXCEPTION, e.getMessage()));
 				return;
 			}
 		} else {
@@ -1416,19 +1569,26 @@ public class UserCommandRunner {
 		/* Get group name from command parameters */
 		if (1 > command.getParameters().size()) {
 			// No identifying value given
-			System.err.println(uiMsg(MSG_ID_NO_GROUPNAME_GIVEN));
+			System.err.println(ProseoLogger.format(UIMessage.NO_GROUPNAME_GIVEN));
 			return;
 		}
-		String groupname = loginManager.getMission() + "-" + command.getParameters().get(0).getValue();
+		String groupname = loginManager.getMissionPrefix() + command.getParameters().get(0).getValue();
 		
 		/* Get granted authorities from command parameters */
 		List<String> authorities = new ArrayList<>();
 		for (int i = 1; i < command.getParameters().size(); ++i) {
-			authorities.add(command.getParameters().get(i).getValue());
+			String authority = command.getParameters().get(i).getValue();
+			try {
+				UserRole.asRole(authority);
+			} catch (IllegalArgumentException e) {
+				System.err.println(ProseoLogger.format(UIMessage.SKIPPING_INVALID_AUTHORITY, authority));
+				continue;
+			}
+			authorities.add(authority);
 		}
 		if (authorities.isEmpty()) {
 			// No authorities to grant given
-			System.err.println(uiMsg(MSG_ID_NO_AUTHORITIES_GIVEN));
+			System.err.println(ProseoLogger.format(UIMessage.NO_AUTHORITIES_GIVEN));
 			return;
 		}
 		
@@ -1454,8 +1614,7 @@ public class UserCommandRunner {
 		}
 		
 		/* Report success */
-		String message = uiMsg(MSG_ID_GROUP_AUTHORITIES_GRANTED, Arrays.toString(authorities.toArray()), restGroup.getGroupname());
-		logger.info(message);
+		String message = logger.log(UIMessage.GROUP_AUTHORITIES_GRANTED, Arrays.toString(authorities.toArray()), restGroup.getGroupname());
 		System.out.println(message);
 	}
 
@@ -1470,19 +1629,26 @@ public class UserCommandRunner {
 		/* Get group name from command parameters */
 		if (1 > command.getParameters().size()) {
 			// No identifying value given
-			System.err.println(uiMsg(MSG_ID_NO_GROUPNAME_GIVEN));
+			System.err.println(ProseoLogger.format(UIMessage.NO_GROUPNAME_GIVEN));
 			return;
 		}
-		String groupname = loginManager.getMission() + "-" + command.getParameters().get(0).getValue();
+		String groupname = loginManager.getMissionPrefix() + command.getParameters().get(0).getValue();
 		
 		/* Get granted authorities from command parameters */
 		List<String> authorities = new ArrayList<>();
 		for (int i = 1; i < command.getParameters().size(); ++i) {
-			authorities.add(command.getParameters().get(i).getValue());
+			String authority = command.getParameters().get(i).getValue();
+			try {
+				UserRole.asRole(authority);
+			} catch (IllegalArgumentException e) {
+				System.err.println(ProseoLogger.format(UIMessage.SKIPPING_INVALID_AUTHORITY, authority));
+				continue;
+			}
+			authorities.add(authority);
 		}
 		if (authorities.isEmpty()) {
 			// No authorities to grant given
-			System.err.println(uiMsg(MSG_ID_NO_AUTHORITIES_GIVEN));
+			System.err.println(ProseoLogger.format(UIMessage.NO_AUTHORITIES_GIVEN));
 			return;
 		}
 		
@@ -1504,8 +1670,7 @@ public class UserCommandRunner {
 		}
 		
 		/* Report success */
-		String message = uiMsg(MSG_ID_GROUP_AUTHORITIES_REVOKED, Arrays.toString(authorities.toArray()), restGroup.getGroupname());
-		logger.info(message);
+		String message = logger.log(UIMessage.GROUP_AUTHORITIES_REVOKED, Arrays.toString(authorities.toArray()), restGroup.getGroupname());
 		System.out.println(message);
 	}
 	
@@ -1519,33 +1684,36 @@ public class UserCommandRunner {
 		
 		/* Check that user is logged in */
 		if (null == loginManager.getUser()) {
-			System.err.println(uiMsg(MSG_ID_USER_NOT_LOGGED_IN, command.getName()));
+			System.err.println(ProseoLogger.format(UIMessage.USER_NOT_LOGGED_IN, command.getName()));
 			return;
 		}
 		if (null == loginManager.getMission()) {
 			if (CMD_USER.equals(command.getName()) && null != command.getSubcommand() && CMD_CREATE.equals(command.getSubcommand().getName()) ) {
-				// OK, "user create" allowed without login to a specific mission
+				// OK, "user create" allowed without login to a specific mission (for administrator only)
+			} else if (CMD_PASSWORD.equals(command.getName())) {
+				// OK, "password" allowed without login to a specific mission (for administrator only)
 			} else {
-				System.err.println(uiMsg(MSG_ID_USER_NOT_LOGGED_IN_TO_MISSION, command.getName()));
+				System.err.println(ProseoLogger.format(UIMessage.USER_NOT_LOGGED_IN_TO_MISSION, command.getName()));
 				return;
 			}
 		}
 		
 		/* Check argument */
-		if (!CMD_USER.equals(command.getName()) && !CMD_GROUP.equals(command.getName())) {
-			System.err.println(uiMsg(MSG_ID_INVALID_COMMAND_NAME, command.getName()));
+		if (!CMD_USER.equals(command.getName()) && !CMD_PASSWORD.equals(command.getName()) && !CMD_GROUP.equals(command.getName())) {
+			System.err.println(ProseoLogger.format(UIMessage.INVALID_COMMAND_NAME, command.getName()));
 			return;
 		}
 		
-		/* Make sure a subcommand is given */
-		if (null == command.getSubcommand() || null == command.getSubcommand().getName()) {
-			System.err.println(uiMsg(MSG_ID_SUBCOMMAND_MISSING, command.getName()));
+		/* Make sure a subcommand is given for "user" and "group" */
+		if (!CMD_PASSWORD.equals(command.getName()) &&
+				(null == command.getSubcommand() || null == command.getSubcommand().getName())) {
+			System.err.println(ProseoLogger.format(UIMessage.SUBCOMMAND_MISSING, command.getName()));
 			return;
 		}
 		
 		/* Check for subcommand help request */
 		ParsedCommand subcommand = command.getSubcommand();
-		if (subcommand.isHelpRequested()) {
+		if (!CMD_PASSWORD.equals(command.getName()) && subcommand.isHelpRequested()) {
 			subcommand.getSyntaxCommand().printHelp(System.out);
 			return;
 		}
@@ -1564,9 +1732,11 @@ public class UserCommandRunner {
 			case CMD_GRANT:		grantAuthority(subcommand); break COMMAND;
 			case CMD_REVOKE:	revokeAuthority(subcommand); break COMMAND;
 			default:
-				System.err.println(uiMsg(MSG_ID_NOT_IMPLEMENTED, command.getName() + " " + subcommand.getName()));
+				System.err.println(ProseoLogger.format(UIMessage.COMMAND_NOT_IMPLEMENTED, command.getName() + " " + subcommand.getName()));
 				return;
 			}
+		case CMD_PASSWORD:
+			changePassword(command); break COMMAND;
 		case CMD_GROUP:
 			switch (subcommand.getName()) {
 			case CMD_CREATE:	createGroup(subcommand); break COMMAND;
@@ -1579,9 +1749,10 @@ public class UserCommandRunner {
 			case CMD_GRANT:		grantGroupAuthority(subcommand); break COMMAND;
 			case CMD_REVOKE:	revokeGroupAuthority(subcommand); break COMMAND;
 			default:
-				System.err.println(uiMsg(MSG_ID_NOT_IMPLEMENTED, command.getName() + " " + subcommand.getName()));
+				System.err.println(ProseoLogger.format(UIMessage.COMMAND_NOT_IMPLEMENTED, command.getName() + " " + subcommand.getName()));
 				return;
 			}
 		}
 	}
+
 }

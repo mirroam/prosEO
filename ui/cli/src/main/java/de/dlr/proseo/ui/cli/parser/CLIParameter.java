@@ -5,7 +5,8 @@
  */
 package de.dlr.proseo.ui.cli.parser;
 
-import static de.dlr.proseo.ui.backend.UIMessages.*;
+import de.dlr.proseo.logging.logger.ProseoLogger;
+import de.dlr.proseo.logging.messages.UIMessage;
 
 /**
  * Class representing a CLI command parameter
@@ -50,7 +51,9 @@ public class CLIParameter {
 		if (CLISyntax.allowedTypes.contains(type)) {
 			this.type = type;
 		} else {
-			throw new IllegalArgumentException(uiMsg(MSG_ID_ILLEGAL_PARAMETER_TYPE, type, CLISyntax.allowedTypes.toString()));
+			throw new IllegalArgumentException(ProseoLogger.format(
+					UIMessage.ILLEGAL_PARAMETER_TYPE, 
+					type, CLISyntax.allowedTypes.toString()));
 		}
 	}
 	/**
@@ -96,5 +99,34 @@ public class CLIParameter {
 				+ ",\n  repeatable=" + repeatable + "\n]";
 	}
 
+	/**
+	 * Appends the StringBuilder provided by the caller with HTML code that prints a
+	 * table with the parameter's name and a description. If applicable, the
+	 * parameter is marked as optional and/or repeatable.
+	 * 
+	 * @param htmlDoc A StringBuilder that may already contain information.
+	 * @return The same StringBuilder, appended information on the option.
+	 */
+	public StringBuilder printHTML(StringBuilder htmlDoc) {
+
+		htmlDoc.append(
+				"<table>" + "<tr>" + "<td>" + "Parameter" + "</td>" + "<td>" + "<strong>" + this.name + "</strong>");
+
+		if (this.optional != null)
+			if (this.repeatable != null)
+				htmlDoc.append(" (optional, repeatable)");
+			else
+				htmlDoc.append(" (optional)");
+		else if (this.repeatable != null)
+			htmlDoc.append(" (repeatable)");
+
+		htmlDoc.append("</td>" + "</tr>")
+				.append("<tr>" + "<td>" + "Type" + "</td>" + "<td>" + this.type + "</td>" + "</tr>").append("<tr>"
+						+ "<td>" + "Description" + "</td>" + "<td>" + this.description + "." + "</td>" + "</tr>");
+
+		htmlDoc.append("</table>").append("<br>");
+
+		return htmlDoc;
+	}
 
 }

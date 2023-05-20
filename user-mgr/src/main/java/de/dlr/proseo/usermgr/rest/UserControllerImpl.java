@@ -12,14 +12,15 @@ import javax.persistence.EntityNotFoundException;
 import javax.persistence.NoResultException;
 import javax.validation.Valid;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
 
+import de.dlr.proseo.logging.http.HttpPrefix;
+import de.dlr.proseo.logging.http.ProseoHttp;
+import de.dlr.proseo.logging.logger.ProseoLogger;
 import de.dlr.proseo.usermgr.rest.model.RestUser;
 
 /**
@@ -30,28 +31,13 @@ import de.dlr.proseo.usermgr.rest.model.RestUser;
 @Component
 public class UserControllerImpl implements UserController {
 
-	/* Message string constants */
-	private static final String HTTP_HEADER_WARNING = "Warning";
-	private static final String HTTP_MSG_PREFIX = "199 proseo-user-mgr ";
-
 	/** The user manager */
 	@Autowired
 	private UserManager userManager;
 
 	/** A logger for this class */
-	private static Logger logger = LoggerFactory.getLogger(UserControllerImpl.class);
-
-	/**
-	 * Create an HTTP "Warning" header with the given text message
-	 * 
-	 * @param message the message text
-	 * @return an HttpHeaders object with a warning message
-	 */
-	private HttpHeaders errorHeaders(String message) {
-		HttpHeaders responseHeaders = new HttpHeaders();
-		responseHeaders.set(HTTP_HEADER_WARNING, HTTP_MSG_PREFIX + message.replaceAll("\n", " "));
-		return responseHeaders;
-	}
+	private static ProseoLogger logger = new ProseoLogger(UserControllerImpl.class);
+	private static ProseoHttp http = new ProseoHttp(logger, HttpPrefix.USER_MGR);
 	
 	/**
 	 * Get users by mission
@@ -67,7 +53,7 @@ public class UserControllerImpl implements UserController {
 		try {
 			return new ResponseEntity<>(userManager.getUsers(mission), HttpStatus.OK);
 		} catch (NoResultException e) {
-			return new ResponseEntity<>(errorHeaders(e.getMessage()), HttpStatus.NOT_FOUND);
+			return new ResponseEntity<>(http.errorHeaders(e.getMessage()), HttpStatus.NOT_FOUND);
 		}
 	}
 
@@ -86,7 +72,7 @@ public class UserControllerImpl implements UserController {
 		try {
 			return new ResponseEntity<>(userManager.createUser(restUser), HttpStatus.CREATED);
 		} catch (IllegalArgumentException e) {
-			return new ResponseEntity<>(errorHeaders(e.getMessage()), HttpStatus.BAD_REQUEST);
+			return new ResponseEntity<>(http.errorHeaders(e.getMessage()), HttpStatus.BAD_REQUEST);
 		}
 	}
 
@@ -106,11 +92,11 @@ public class UserControllerImpl implements UserController {
 		try {
 			return new ResponseEntity<>(userManager.getUserByName(username), HttpStatus.OK);
 		} catch (NoResultException e) {
-			return new ResponseEntity<>(errorHeaders(e.getMessage()), HttpStatus.NOT_FOUND);
+			return new ResponseEntity<>(http.errorHeaders(e.getMessage()), HttpStatus.NOT_FOUND);
 		} catch (IllegalArgumentException e) {
-			return new ResponseEntity<>(errorHeaders(e.getMessage()), HttpStatus.BAD_REQUEST);
+			return new ResponseEntity<>(http.errorHeaders(e.getMessage()), HttpStatus.BAD_REQUEST);
 		} catch (SecurityException e) {
-			return new ResponseEntity<>(errorHeaders(e.getMessage()), HttpStatus.UNAUTHORIZED);
+			return new ResponseEntity<>(http.errorHeaders(e.getMessage()), HttpStatus.UNAUTHORIZED);
 		}
 	}
 
@@ -130,9 +116,9 @@ public class UserControllerImpl implements UserController {
 			userManager.deleteUserByName(username);
 			return new ResponseEntity<>(new HttpHeaders(), HttpStatus.NO_CONTENT);
 		} catch (EntityNotFoundException e) {
-			return new ResponseEntity<>(errorHeaders(e.getMessage()), HttpStatus.NOT_FOUND);
+			return new ResponseEntity<>(http.errorHeaders(e.getMessage()), HttpStatus.NOT_FOUND);
 		} catch (RuntimeException e) {
-			return new ResponseEntity<>(errorHeaders(e.getMessage()), HttpStatus.NOT_MODIFIED);
+			return new ResponseEntity<>(http.errorHeaders(e.getMessage()), HttpStatus.NOT_MODIFIED);
 		}
 	}
 
@@ -142,6 +128,7 @@ public class UserControllerImpl implements UserController {
 	 * @param username the name of the user to update
 	 * @param restUser a Json object containing the modified (and unmodified) attributes
 	 * @return HTTP status "OK" and a response containing a Json object corresponding to the user after modification or 
+	 *         HTTP status "NOT_MODIFIED" and a warning message, if the input date was the same as the database data, or
 	 * 		   HTTP status "NOT_FOUND" and an error message, if no user with the given name exists, or
 	 *         HTTP status "BAD_REQUEST" and an error message, if any of the input data was invalid, or
 	 *         HTTP status "UNAUTHORIZED" and an error message, if a user (not user mgr) attempted to change anything but their own password, or
@@ -153,14 +140,16 @@ public class UserControllerImpl implements UserController {
 		
 		try {
 			return new ResponseEntity<>(userManager.modifyUser(username, restUser), HttpStatus.OK);
+		} catch (UserManager.NotModifiedException e) {
+			return new ResponseEntity<>(http.errorHeaders(e.getMessage()), HttpStatus.NOT_MODIFIED);
 		} catch (EntityNotFoundException e) {
-			return new ResponseEntity<>(errorHeaders(e.getMessage()), HttpStatus.NOT_FOUND);
+			return new ResponseEntity<>(http.errorHeaders(e.getMessage()), HttpStatus.NOT_FOUND);
 		} catch (IllegalArgumentException e) {
-			return new ResponseEntity<>(errorHeaders(e.getMessage()), HttpStatus.BAD_REQUEST);
+			return new ResponseEntity<>(http.errorHeaders(e.getMessage()), HttpStatus.BAD_REQUEST);
 		} catch (SecurityException e) {
-			return new ResponseEntity<>(errorHeaders(e.getMessage()), HttpStatus.UNAUTHORIZED);
+			return new ResponseEntity<>(http.errorHeaders(e.getMessage()), HttpStatus.UNAUTHORIZED);
 		} catch (ConcurrentModificationException e) {
-			return new ResponseEntity<>(errorHeaders(e.getMessage()), HttpStatus.CONFLICT);
+			return new ResponseEntity<>(http.errorHeaders(e.getMessage()), HttpStatus.CONFLICT);
 		}
 	}
 

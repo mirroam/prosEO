@@ -3,8 +3,6 @@ package de.dlr.proseo.ui.gui;
 import java.util.ArrayList;
 import java.util.List;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Controller;
@@ -14,6 +12,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.context.request.async.DeferredResult;
 import org.springframework.web.reactive.function.client.ClientResponse;
+
+import de.dlr.proseo.logging.logger.ProseoLogger;
 import de.dlr.proseo.ui.backend.ServiceConnection;
 import de.dlr.proseo.ui.gui.service.StatisticsService;
 import reactor.core.publisher.Mono;
@@ -22,19 +22,11 @@ import reactor.core.publisher.Mono;
 public class GUIStatisticsController extends GUIBaseController {
 
 	/** A logger for this class */
-	private static Logger logger = LoggerFactory.getLogger(GUIStatisticsController.class);
-
-	/** The GUI configuration */
-	@Autowired
-	private GUIConfiguration config;
+	private static ProseoLogger logger = new ProseoLogger(GUIStatisticsController.class);
 
 	/** WebClient-Service-Builder */
 	@Autowired
 	private StatisticsService statisticsService;
-
-	/** The connector service to the prosEO backend services */
-	@Autowired
-	private ServiceConnection serviceConnection;
 
 	@GetMapping(value = "/dashboard")
 	public String dashboard() {
@@ -63,20 +55,13 @@ public class GUIStatisticsController extends GUIBaseController {
 		Mono<ClientResponse> mono = statisticsService.getJobsteps("FAILED", count.longValue());
 		DeferredResult<String> deferredResult = new DeferredResult<String>();
 		List<Object> jobsteps = new ArrayList<>();
-		GUIAuthenticationToken auth = (GUIAuthenticationToken) SecurityContextHolder.getContext().getAuthentication();
-		mono.subscribe(clientResponse -> {
+		mono.doOnError(e -> {
+			model.addAttribute("errormsg", e.getMessage());
+			deferredResult.setResult("dashboard :: #errormsg");
+		})
+	 	.subscribe(clientResponse -> {
 			logger.trace("Now in Consumer::accept({})", clientResponse);
-			if (clientResponse.statusCode().is5xxServerError()) {
-				logger.trace(">>>Server side error (HTTP status 500)");
-				model.addAttribute("errormsg", "Server side error (HTTP status 500)");
-				deferredResult.setResult("dashboard :: #failedjs");
-				logger.trace(">>DEFERREDRES 500: {}", deferredResult.getResult());
-			} else if (clientResponse.statusCode().is4xxClientError()) {
-				logger.trace(">>>Warning Header: {}", clientResponse.headers().asHttpHeaders().getFirst("Warning"));
-				model.addAttribute("errormsg", clientResponse.headers().asHttpHeaders().getFirst("Warning"));
-				deferredResult.setResult("dashboard :: #failedjs");
-				logger.trace(">>DEFERREDRES 4xx: {}", deferredResult.getResult());
-			} else if (clientResponse.statusCode().is2xxSuccessful()) {
+			if (clientResponse.statusCode().is2xxSuccessful()) {
 				clientResponse.bodyToMono(List.class).subscribe(jobstepList -> {
 					jobsteps.addAll(jobstepList);
 					List<Object> failedjobsteps = null;
@@ -91,9 +76,16 @@ public class GUIStatisticsController extends GUIBaseController {
 					deferredResult.setResult("dashboard :: #failedjs");
 					logger.trace(">>DEFERREDRES: {}", deferredResult.getResult());
 				});
+			} else {
+				handleHTTPError(clientResponse, model);
+				deferredResult.setResult("dashboard :: #errormsg");
 			}
 			logger.trace(">>>>MODEL" + model.toString());
 
+		},
+		e -> {
+			model.addAttribute("errormsg", e.getMessage());
+			deferredResult.setResult("dashboard :: #errormsg");
 		});
 		logger.trace(model.toString() + "MODEL TO STRING");
 		logger.trace(">>>>MONO" + jobsteps.toString());
@@ -118,20 +110,13 @@ public class GUIStatisticsController extends GUIBaseController {
 		Mono<ClientResponse> mono = statisticsService.getJobsteps("COMPLETED", count.longValue());
 		DeferredResult<String> deferredResult = new DeferredResult<String>();
 		List<Object> jobsteps = new ArrayList<>();
-		GUIAuthenticationToken auth = (GUIAuthenticationToken) SecurityContextHolder.getContext().getAuthentication();
-		mono.subscribe(clientResponse -> {
+		mono.doOnError(e -> {
+			model.addAttribute("errormsg", e.getMessage());
+			deferredResult.setResult("dashboard :: #errormsg");
+		})
+	 	.subscribe(clientResponse -> {
 			logger.trace("Now in Consumer::accept({})", clientResponse);
-			if (clientResponse.statusCode().is5xxServerError()) {
-				logger.trace(">>>Server side error (HTTP status 500)");
-				model.addAttribute("errormsg", "Server side error (HTTP status 500)");
-				deferredResult.setResult("dashboard :: #completedjs");
-				logger.trace(">>DEFERREDRES 500: {}", deferredResult.getResult());
-			} else if (clientResponse.statusCode().is4xxClientError()) {
-				logger.trace(">>>Warning Header: {}", clientResponse.headers().asHttpHeaders().getFirst("Warning"));
-				model.addAttribute("errormsg", clientResponse.headers().asHttpHeaders().getFirst("Warning"));
-				deferredResult.setResult("dashboard :: #completedjs");
-				logger.trace(">>DEFERREDRES 4xx: {}", deferredResult.getResult());
-			} else if (clientResponse.statusCode().is2xxSuccessful()) {
+			if (clientResponse.statusCode().is2xxSuccessful()) {
 				clientResponse.bodyToMono(List.class).subscribe(jobstepList -> {
 					jobsteps.addAll(jobstepList);
 					List<Object> completedjobsteps = null;
@@ -146,9 +131,16 @@ public class GUIStatisticsController extends GUIBaseController {
 					deferredResult.setResult("dashboard :: #completedjs");
 					logger.trace(">>DEFERREDRES: {}", deferredResult.getResult());
 				});
+			} else {
+				handleHTTPError(clientResponse, model);
+				deferredResult.setResult("dashboard :: #errormsg");
 			}
 			logger.trace(">>>>MODEL" + model.toString());
 
+		},
+		e -> {
+			model.addAttribute("errormsg", e.getMessage());
+			deferredResult.setResult("dashboard :: #errormsg");
 		});
 		logger.trace(model.toString() + "MODEL TO STRING");
 		logger.trace(">>>>MONO" + jobsteps.toString());

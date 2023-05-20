@@ -5,9 +5,11 @@
       id?:
         type: integer
         format: long
+        default: 0
         description: The persistent id of this object
       version?:
         type: integer
+        default: 1
         description: A version identifier to track updates to the object (especially to detect concurrent update attempts)
       uuid?:
         type: string
@@ -19,6 +21,9 @@
       productClass:
         type: string
         description: Product type of the Product class this products instantiates
+      processingLevel?:
+        type: string
+        description: The level of processing required for this product's product class (L0, L1, L1A, L1B, L2, L2A etc.; output only)
       fileClass:
         type: string
         description: File class as defined for the enclosing mission
@@ -36,10 +41,25 @@
         type: string
         description: Sensing stop time in orbit format (YYYY-MM-DDThh:mm:ss.SSSSSS)
         pattern: ^\d\d\d\d-\d\d-\d\dT\d\d:\d\d:\d\d.\d{6}$
+      rawDataAvailabilityTime?:
+        type: string
+        description: Satellite raw data availability time in orbit format (YYYY-MM-DDThh:mm:ss.SSSSSS)
+        pattern: ^\d\d\d\d-\d\d-\d\dT\d\d:\d\d:\d\d.\d{6}$
       generationTime:
         type: string
         description: Product generation time in orbit format (YYYY-MM-DDThh:mm:ss.SSSSSS)
         pattern: ^\d\d\d\d-\d\d-\d\dT\d\d:\d\d:\d\d.\d{6}$
+      publicationTime?:
+        type: string
+        description: Product ingestion time in orbit format (YYYY-MM-DDThh:mm:ss.SSSSSS)
+        pattern: ^\d\d\d\d-\d\d-\d\dT\d\d:\d\d:\d\d.\d{6}$
+      evictionTime?:
+        type: string
+        description: Product eviction time in orbit format (YYYY-MM-DDThh:mm:ss.SSSSSS)
+        pattern: ^\d\d\d\d-\d\d-\d\dT\d\d:\d\d:\d\d.\d{6}$
+      downloadHistory?:
+        type: RestDownloadHistory[]
+        description: The download history for this product
       productionType?:
         type: string
         description: Type of production process generating this product (SYSTEMATIC, ON_DEMAND_DEFAULT, ON_DEMAND_NON_DEFAULT)

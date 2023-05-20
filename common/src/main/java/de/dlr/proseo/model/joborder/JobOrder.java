@@ -30,6 +30,8 @@ import org.w3c.dom.Element;
 import org.w3c.dom.Node;
 import org.xml.sax.SAXException;
 
+import de.dlr.proseo.model.enums.JobOrderVersion;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -125,11 +127,25 @@ public class JobOrder {
 	 * @param fileName the file name
 	 * @param prosEOAttributes if true, write attributes of prosEO specific data
 	 * @return true after success, else false
+	 * @deprecated Use {@link #writeXML(String,JobOrderVersion,Boolean)} instead
 	 */
 	public Boolean writeXML(String fileName, Boolean prosEOAttributes) {
+		return writeXML(fileName, JobOrderVersion.MMFI_1_8, prosEOAttributes);
+	}
+
+	/**
+	 * Build XML tree and write it to file named fileName.
+	 * @param fileName the file name
+	 * @param jobOrderVersion the Job Order file specification version to apply
+	 * @param prosEOAttributes if true, write attributes of prosEO specific data
+	 * @return true after success, else false
+	 */
+	public Boolean writeXML(String fileName, JobOrderVersion jobOrderVersion, Boolean prosEOAttributes) {
+		if (logger.isTraceEnabled()) logger.trace(">>> writeXML({}, {}, {})", fileName, jobOrderVersion, prosEOAttributes);
+
 		try {
 			FileOutputStream fout = new FileOutputStream(fileName);
-			writeXMLToStream(fout, prosEOAttributes);
+			writeXMLToStream(fout, prosEOAttributes, jobOrderVersion);
 			fout.close();
 		} catch (FileNotFoundException e) {
 			// TODO Auto-generated catch block
@@ -145,13 +161,16 @@ public class JobOrder {
 
 	/**
 	 * Create a Base64-coded string from the XML representation of this Job Order
+	 * @param jobOrderVersion the Job Order file specification version to apply
 	 * @param prosEOAttributes if true, write attributes of prosEO specific data
 	 * @return the Base64-coded string
 	 */
-	public String buildBase64String(Boolean prosEOAttributes) {
+	public String buildBase64String(JobOrderVersion jobOrderVersion, Boolean prosEOAttributes) {
+		if (logger.isTraceEnabled()) logger.trace(">>> buildBase64String({}, {})", jobOrderVersion, prosEOAttributes);
+
 		try {
 			ByteArrayOutputStream baos = new ByteArrayOutputStream();
-			writeXMLToStream(baos, prosEOAttributes);	
+			writeXMLToStream(baos, prosEOAttributes, jobOrderVersion);	
 			String xmlString = baos.toString();
 			baos.close();
 			byte[] bytes = java.util.Base64.getEncoder().encode(xmlString.getBytes());
@@ -164,12 +183,26 @@ public class JobOrder {
 	}
 	
 	/**
-	 * Writes the content of the Job Order to an XML-formatted output stream
+	 * Writes the content of the Job Order to an XML-formatted output stream conforming to the MMFI_1_8 Job Order file syntax
 	 * @param aStream the stream to write to
 	 * @param prosEOAttributes if true, write attributes of prosEO specific data 
 	 * @return true, if the operation completed successfully, false otherwise
+	 * @deprecated Use {@link #writeXMLToStream(OutputStream,Boolean,JobOrderVersion)} instead
 	 */
 	public Boolean writeXMLToStream(OutputStream aStream, Boolean prosEOAttributes) {
+		return writeXMLToStream(aStream, prosEOAttributes, JobOrderVersion.MMFI_1_8);
+	}
+
+	/**
+	 * Writes the content of the Job Order to an XML-formatted output stream
+	 * @param aStream the stream to write to
+	 * @param prosEOAttributes if true, write attributes of prosEO specific data 
+	 * @param jobOrderVersion the Job Order file specification version to apply
+	 * @return true, if the operation completed successfully, false otherwise
+	 */
+	public Boolean writeXMLToStream(OutputStream aStream, Boolean prosEOAttributes, JobOrderVersion jobOrderVersion) {
+		if (logger.isTraceEnabled()) logger.trace(">>> writeXMLToStream(OutputStream, {}, {})", prosEOAttributes, jobOrderVersion);
+
 		DocumentBuilderFactory docFactory = DocumentBuilderFactory.newInstance();
 		DocumentBuilder docBuilder;
 		try {
@@ -177,7 +210,7 @@ public class JobOrder {
 			Document doc = docBuilder.newDocument();
 			Element rootElement = doc.createElement("Ipf_Job_Order");
 			doc.appendChild(rootElement);
-			conf.buildXML(doc, rootElement, prosEOAttributes);
+			conf.buildXML(doc, rootElement, jobOrderVersion, prosEOAttributes);
 			Element listEle = doc.createElement("List_of_Ipf_Procs");
 		    Attr attr = doc.createAttribute("count");
 		    attr.setValue(Integer.toString(listOfProcs.size()));
@@ -213,9 +246,11 @@ public class JobOrder {
 	/**
 	 * Read a Job Order  from an XML-formatted string
 	 * @param jobOrderString the XML-formatted Job Order File
-	 * @return a Job Order object
+	 * @return the modified Job Order object or null, if the string cannot be parsed into a Job Order object
 	 */
 	public JobOrder read(String jobOrderString) {
+		if (logger.isTraceEnabled()) logger.trace(">>> read({})", jobOrderString.substring(0, 30) + "...");
+
 		InputStream aStream = new ByteArrayInputStream(jobOrderString.getBytes());
 
 		DocumentBuilder docBuilder = null;
@@ -229,7 +264,7 @@ public class JobOrder {
 		try {
 			jobOrderDoc = docBuilder.parse(aStream);
 		} catch (SAXException | IOException e) {
-			logger.error(MSG_JOF_NOT_PARSEABLE, e.getMessage());
+			logger.error(MSG_JOF_NOT_PARSEABLE, jobOrderString, e.getMessage());
 			return null;
 		}
 		// now we have the document, fill tree structure

@@ -17,10 +17,15 @@ import javax.persistence.CascadeType;
 import javax.persistence.Column;
 import javax.persistence.ElementCollection;
 import javax.persistence.Entity;
+import javax.persistence.EnumType;
+import javax.persistence.Enumerated;
+import javax.persistence.FetchType;
 import javax.persistence.Index;
 import javax.persistence.ManyToOne;
 import javax.persistence.OneToMany;
 import javax.persistence.Table;
+
+import de.dlr.proseo.model.enums.JobOrderVersion;
 
 /**
  * A specific version of a ProcessorClass. Each permissible combination of a specific Processor with a specific Configuration is
@@ -48,6 +53,13 @@ public class Processor extends PersistentObject {
 	 */
 	@Column(name = "processor_version")
 	private String processorVersion;
+	
+	/** The Job Order file specification version to apply when generating Job Order files */
+	@Enumerated(EnumType.STRING)
+	private JobOrderVersion jobOrderVersion = JobOrderVersion.MMFI_1_8;
+	
+	/** Indicates whether for input files in the Job Order file time intervals shall be given */
+	private Boolean useInputFileTimeIntervals = false;
 	
 	/** Indicates a test version of the processor ("Test" from Generic IPF Interface Specifications, sec. 4.1.3; default false) */
 	private Boolean isTest = false;
@@ -132,6 +144,42 @@ public class Processor extends PersistentObject {
 	 */
 	public void setProcessorVersion(String processorVersion) {
 		this.processorVersion = processorVersion;
+	}
+
+	/**
+	 * Gets the Job Order file specification version
+	 * 
+	 * @return the Job Order file specification version
+	 */
+	public JobOrderVersion getJobOrderVersion() {
+		return jobOrderVersion;
+	}
+
+	/**
+	 * Sets the Job Order file specification version
+	 * 
+	 * @param jobOrderVersion the Job Order file specification version to set
+	 */
+	public void setJobOrderVersion(JobOrderVersion jobOrderVersion) {
+		this.jobOrderVersion = jobOrderVersion;
+	}
+
+	/**
+	 * Gets the indicator for generation of input file time intervals
+	 * 
+	 * @return true, if input file time intervals shall be generated for this processor, false otherwise
+	 */
+	public Boolean getUseInputFileTimeIntervals() {
+		return useInputFileTimeIntervals;
+	}
+
+	/**
+	 * Sets the indicator for generation of input file time intervals
+	 * 
+	 * @param useInputFileTimeIntervals set to true, if input file time intervals shall be generated for this processor, and to false otherwise
+	 */
+	public void setUseInputFileTimeIntervals(Boolean useInputFileTimeIntervals) {
+		this.useInputFileTimeIntervals = useInputFileTimeIntervals;
 	}
 
 	/**
@@ -288,14 +336,24 @@ public class Processor extends PersistentObject {
 
 	@Override
 	public boolean equals(Object obj) {
-		if (this == obj)
+		// Object identity
+		if (this == obj) {
+			System.out.println("--- OK: identical Processor objects ---");
 			return true;
-		if (!super.equals(obj))
+		}
+		
+		// Same database object
+		if (super.equals(obj)) {
+			System.out.println("--- OK: same Processor database objects ---");
+			return true;
+		}
+		
+		if (!(obj instanceof Processor)) {
+			System.out.println("--- FAIL: other is not a Processor ---");
 			return false;
-		if (!(obj instanceof Processor))
-			return false;
+		}
 		Processor other = (Processor) obj;
-		return Objects.equals(processorClass, other.processorClass) && Objects.equals(processorVersion, other.processorVersion);
+		return Objects.equals(processorVersion, other.getProcessorVersion()) && Objects.equals(processorClass, other.getProcessorClass());
 	}
 
 	@Override

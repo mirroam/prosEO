@@ -5,9 +5,11 @@
       id?:
         type: integer
         format: long
+        default: 0
         description: The persistent id of this object
       version?:
         type: integer
+        default: 1
         description: A version identifier to track updates to the object (especially to detect concurrent update attempts)
       name?:
         type: string
@@ -17,7 +19,8 @@
         format: long
         description: The persistend id of the job this job step belongs to
       jobStepState:
-        enum: [ INITIAL, WAITING_INPUT, READY, RUNNING, COMPLETED, FAILED ]
+        enum: [ PLANNED, WAITING_INPUT, READY, RUNNING, COMPLETED, FAILED, CLOSED ]
+        default: PLANNED
         description: The currenet status of the job step
       outputParameters:
         type: RestParameter[]
@@ -34,6 +37,9 @@
       outputProduct?:
         type: integer
         description: The id of the output product of this job step
+      configuredProcessor?:
+        type: string
+        description: The configured processor used to create the output product
       processingStartTime?:
         type: datetime-only
         description: The start time of the processing job
@@ -42,9 +48,11 @@
         description: The completion time of the processing job
       stdoutLogLevel?:
         enum: [ DEBUG, INFO, PROGRESS, WARNING, ERROR ]
+        default: INFO
         description: The log level of stdout 
       stderrLogLevel?:
         enum: [ DEBUG, INFO, PROGRESS, WARNING, ERROR ]
+        default: INFO
         description: The log level of stderr 
       processingStdOut?:
         type: string
@@ -52,6 +60,9 @@
       processingStdErr?:
         type: string
         description: The standard error output of the processing job
+      isFailed:
+        type: boolean
+        description: The failed state of the job step
       jobOrderFilename?:
         type: string
         description: The filename of the Job Order file in the associated processing facility

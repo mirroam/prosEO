@@ -7,8 +7,6 @@ package de.dlr.proseo.planner;
 
 import javax.sql.DataSource;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -22,6 +20,8 @@ import org.springframework.security.core.userdetails.jdbc.JdbcDaoImpl;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
+import de.dlr.proseo.logging.logger.ProseoLogger;
+import de.dlr.proseo.logging.messages.GeneralMessage;
 import de.dlr.proseo.model.enums.UserRole;
 
 /**
@@ -38,7 +38,7 @@ public class ProductionPlannerSecurityConfig extends WebSecurityConfigurerAdapte
 	private DataSource dataSource;
 	
 	/** A logger for this class */
-	private static Logger logger = LoggerFactory.getLogger(ProductionPlannerSecurityConfig.class);
+	private static ProseoLogger logger = new ProseoLogger(ProductionPlannerSecurityConfig.class);
 	
 	/**
 	 * Set the Ingestor security options
@@ -51,6 +51,7 @@ public class ProductionPlannerSecurityConfig extends WebSecurityConfigurerAdapte
 			.httpBasic()
 				.and()
 			.authorizeRequests()
+				.antMatchers("/**/actuator/health").permitAll()
 				.antMatchers(HttpMethod.GET, "/**/orders").hasAnyRole(UserRole.ORDER_READER.toString())
 				.antMatchers("/**/orders/approve").hasAnyRole(UserRole.ORDER_APPROVER.toString())
 				.antMatchers(
@@ -66,6 +67,7 @@ public class ProductionPlannerSecurityConfig extends WebSecurityConfigurerAdapte
 				.antMatchers(HttpMethod.GET, "/**/processingfacilities").hasAnyRole(UserRole.FACILITY_READER.toString())
 				.antMatchers("/**/processingfacilities/*/finish/*").hasAnyRole(UserRole.JOBSTEP_PROCESSOR.toString())
 				.antMatchers("/**/product/*").hasAnyRole(UserRole.PRODUCT_INGESTOR.toString(), UserRole.JOBSTEP_PROCESSOR.toString())
+				.antMatchers("/**/semaphore/*").hasAnyRole(UserRole.PRODUCT_INGESTOR.toString(), UserRole.JOBSTEP_PROCESSOR.toString())
 				.anyRequest().hasAnyRole(UserRole.ORDER_MGR.toString())
 			.and()
 			.csrf().disable(); // Required for POST requests (or configure CSRF)
@@ -79,7 +81,7 @@ public class ProductionPlannerSecurityConfig extends WebSecurityConfigurerAdapte
 	 */
 	@Autowired
 	public void initialize(AuthenticationManagerBuilder builder) throws Exception {
-		logger.info("Initializing authentication from user details service ");
+		logger.log(GeneralMessage.INITIALIZING_AUTHENTICATION);
 
 		builder.userDetailsService(userDetailsService());
 	}
@@ -101,7 +103,7 @@ public class ProductionPlannerSecurityConfig extends WebSecurityConfigurerAdapte
 	 */
 	@Bean
 	public UserDetailsService userDetailsService() {
-		logger.info("Initializing user details service from datasource " + dataSource);
+		logger.log(GeneralMessage.INITIALIZING_USER_DETAILS_SERVICE, dataSource);
 
 		JdbcDaoImpl jdbcDaoImpl = new JdbcDaoImpl();
 		jdbcDaoImpl.setDataSource(dataSource);

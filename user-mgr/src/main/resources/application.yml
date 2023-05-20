@@ -6,7 +6,7 @@ spring:
     datasource:
         url: jdbc:postgresql://proseo-db:5432/proseo
         username: postgres
-        password: sequel09Master
+        password: postgres
 logging:
     level:
         root: INFO
